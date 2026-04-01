@@ -138,7 +138,7 @@ def api_bluetooth_scan():
 
     except Exception as e:
         log(f"Errore scansione Bluetooth: {e}", "warning")
-        return jsonify({"devices": [], "error": str(e)})
+        return jsonify({"devices": [], "error": "Scansione Bluetooth non disponibile"})
 
     return jsonify({"devices": devices})
 
