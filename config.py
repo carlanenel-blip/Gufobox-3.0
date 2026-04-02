@@ -52,10 +52,18 @@ AI_SETTINGS_FILE = os.path.join(DATA_DIR, "ai_settings.json")
 ALARMS_FILE = os.path.join(DATA_DIR, "alarms.json")
 JOB_STATE_FILE = os.path.join(DATA_DIR, "jobs_state.json")
 RFID_MAP_FILE = os.path.join(DATA_DIR, "rfid_map.json")
+RFID_PROFILES_FILE = os.path.join(DATA_DIR, "rfid_profiles.json")
+RSS_RUNTIME_FILE = os.path.join(DATA_DIR, "rss_runtime.json")
+
+# Resume avanzato
+RESUME_MAX_AGE_SEC = 30 * 24 * 3600  # 30 giorni
+
+# Estensioni media supportate per playlist cartella
+MEDIA_EXTENSIONS = {".mp3", ".ogg", ".flac", ".wav", ".m4a", ".aac", ".opus", ".mp4", ".mkv", ".avi"}
 
 # Impostazioni Ottimizzazione
 STATE_SAVE_DEBOUNCE_SEC = 2
-API_VERSION = "18.0.0"
+API_VERSION = "18.1.0"
 
 # OTA / Backup
 BACKUP_DIR = os.path.join(DATA_DIR, "backups")

@@ -7,7 +7,8 @@ from copy import deepcopy
 
 from config import (
     STATE_FILE, MEDIA_RUNTIME_FILE, LED_RUNTIME_FILE, AI_RUNTIME_FILE,
-    ALARMS_FILE, JOB_STATE_FILE, RFID_MAP_FILE, STATE_SAVE_DEBOUNCE_SEC
+    ALARMS_FILE, JOB_STATE_FILE, RFID_MAP_FILE, RFID_PROFILES_FILE,
+    RSS_RUNTIME_FILE, STATE_SAVE_DEBOUNCE_SEC
 )
 from core.extensions import socketio
 from core.utils import log
@@ -67,6 +68,14 @@ DEFAULT_MEDIA_RUNTIME = {
     "current_file": None,
     "current_rfid_uid": None,
     "resume_position": None,
+    # PR2: campi estesi
+    "current_rfid": None,
+    "current_profile_name": None,
+    "current_mode": "idle",
+    "current_media_path": None,
+    "current_playlist": [],
+    "playlist_index": 0,
+    "rss_state": None,
 }
 DEFAULT_LED_RUNTIME = {
     "master_enabled": True,
@@ -84,6 +93,8 @@ ai_runtime = load_json(AI_RUNTIME_FILE, DEFAULT_AI_RUNTIME)
 alarms_list = load_json(ALARMS_FILE, [])
 jobs_state = load_json(JOB_STATE_FILE, {})
 rfid_map = load_json(RFID_MAP_FILE, {})
+rfid_profiles = load_json(RFID_PROFILES_FILE, {})
+rss_runtime = load_json(RSS_RUNTIME_FILE, {})
 
 # =========================================================
 # FUNZIONI SNAPSHOT PER IL FRONTEND
@@ -115,6 +126,8 @@ def build_admin_snapshot():
     payload = build_public_snapshot().copy()
     payload["jobs"] = get_jobs_list_sorted()
     payload["rfid_map"] = rfid_map
+    payload["rfid_profiles"] = rfid_profiles
+    payload["rss_runtime"] = rss_runtime
     return payload
 
 # =========================================================
@@ -161,6 +174,8 @@ class EventBus:
             if "led" in to_save: save_json_direct(LED_RUNTIME_FILE, led_runtime)
             if "ai" in to_save: save_json_direct(AI_RUNTIME_FILE, ai_runtime)
             if "alarms" in to_save: save_json_direct(ALARMS_FILE, alarms_list)
+            if "rfid_profiles" in to_save: save_json_direct(RFID_PROFILES_FILE, rfid_profiles)
+            if "rss" in to_save: save_json_direct(RSS_RUNTIME_FILE, rss_runtime)
 
             # 2. Aggiornamenti WebSocket verso Vue.js (raggruppati)
             if "public" in to_emit:

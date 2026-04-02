@@ -1,3 +1,4 @@
+import os
 import subprocess
 import threading
 import socket
@@ -6,6 +7,7 @@ import eventlet
 
 from core.state import media_runtime, bus
 from core.utils import log
+from config import MEDIA_EXTENSIONS
 
 # Lock di sicurezza per evitare che due thread modifichino il player contemporaneamente
 player_lock = threading.Lock()
@@ -17,6 +19,27 @@ MPV_IPC_SOCKET = "/tmp/gufobox-mpv.sock"
 # Tracciamo l'rfid_uid e il target correnti per il Smart Resume
 _current_rfid_uid = None
 _current_target = None
+_current_playlist_index = 0
+
+
+# =========================================================
+# PLAYLIST BUILDER
+# =========================================================
+def build_playlist(folder):
+    """Costruisce una lista ordinata di file media da una cartella."""
+    try:
+        real_folder = os.path.realpath(folder)
+        if not os.path.isdir(real_folder):
+            return []
+        files = sorted(
+            os.path.join(real_folder, f)
+            for f in os.listdir(real_folder)
+            if os.path.splitext(f)[1].lower() in MEDIA_EXTENSIONS
+        )
+        return files
+    except Exception as e:
+        log(f"Errore build_playlist({folder}): {e}", "warning")
+        return []
 
 def build_mpv_command(target, mode):
     """Costruisce il comando per il terminale in base al tipo di file"""
@@ -68,7 +91,7 @@ def _save_resume_if_needed():
     Legge la posizione corrente da MPV via IPC e la salva nel database.
     Chiamata prima di fermare la riproduzione o quando finisce naturalmente.
     """
-    global _current_rfid_uid, _current_target
+    global _current_rfid_uid, _current_target, _current_playlist_index
     if not _current_rfid_uid or not _current_target:
         return
     try:
@@ -77,14 +100,20 @@ def _save_resume_if_needed():
             position = response.get("data", 0) or 0
             if position > 0:
                 from core.database import save_resume_position
-                save_resume_position(_current_rfid_uid, _current_target, int(position))
-                log(f"🔖 Smart Resume salvato: {int(position)}s per statuina {_current_rfid_uid}", "info")
+                save_resume_position(
+                    _current_rfid_uid,
+                    _current_target,
+                    int(position),
+                    playlist_index=_current_playlist_index,
+                )
+                log(f"🔖 Smart Resume salvato: {int(position)}s idx={_current_playlist_index} per statuina {_current_rfid_uid}", "info")
     except Exception as e:
         log(f"Impossibile salvare posizione resume: {e}", "warning")
 
-def start_player(target, mode="audio_only", rfid_uid=None):
+def start_player(target, mode="audio_only", rfid_uid=None, playlist_index=0,
+                 profile_name=None, profile_mode=None, volume=None):
     """Ferma eventuali riproduzioni in corso e avvia il nuovo file"""
-    global player_proc, _current_rfid_uid, _current_target
+    global player_proc, _current_rfid_uid, _current_target, _current_playlist_index
 
     # Ferma sempre prima di far partire qualcosa di nuovo
     stop_player()
@@ -92,16 +121,32 @@ def start_player(target, mode="audio_only", rfid_uid=None):
     cmd = build_mpv_command(target, mode)
 
     # Smart Resume: se abbiamo un rfid_uid, riprendiamo da dove eravamo
+    resume_info = None
     if rfid_uid:
         from core.database import get_resume_position
         resume = get_resume_position(rfid_uid)
         if resume and resume.get("target") == target and resume.get("position", 0) > 0:
+            # Usa l'indice playlist salvato se non ne viene fornito uno esplicito
+            if playlist_index == 0 and resume.get("playlist_index", 0) > 0:
+                playlist_index = resume["playlist_index"]
             cmd.insert(-1, f"--start=+{resume['position']}")
-            log(f"🔖 Smart Resume: ripresa da {resume['position']}s per statuina {rfid_uid}", "info")
+            resume_info = resume
+            log(f"🔖 Smart Resume: ripresa da {resume['position']}s idx={playlist_index} per statuina {rfid_uid}", "info")
 
     # Traccia statuina e file correnti per il salvataggio automatico della posizione
     _current_rfid_uid = rfid_uid
     _current_target = target
+    _current_playlist_index = playlist_index
+
+    # Applica volume se specificato
+    if volume is not None:
+        try:
+            from core.utils import run_cmd
+            vol = max(0, min(100, int(volume)))
+            run_cmd(["amixer", "sset", "Master", f"{vol}%"])
+            media_runtime["current_volume"] = vol
+        except Exception as e:
+            log(f"Errore impostazione volume: {e}", "warning")
 
     # Avvia MPV in background
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -109,9 +154,18 @@ def start_player(target, mode="audio_only", rfid_uid=None):
     with player_lock:
         player_proc = proc
 
-    # Aggiorna lo stato globale
+    # Aggiorna lo stato globale (campi base + PR2 estesi)
     media_runtime["player_running"] = True
     media_runtime["player_mode"] = mode
+    media_runtime["current_file"] = target
+    media_runtime["current_rfid_uid"] = rfid_uid
+    media_runtime["resume_position"] = resume_info
+    # Campi PR2
+    media_runtime["current_rfid"] = rfid_uid
+    media_runtime["current_profile_name"] = profile_name
+    media_runtime["current_mode"] = profile_mode or mode
+    media_runtime["current_media_path"] = target
+    media_runtime["playlist_index"] = playlist_index
 
     # Segnala all'EventBus che deve salvare su SD e avvisare il frontend
     bus.mark_dirty("media")
@@ -122,7 +176,7 @@ def start_player(target, mode="audio_only", rfid_uid=None):
 
 def stop_player():
     """Ferma il player in modo sicuro e pulito"""
-    global player_proc, _current_rfid_uid, _current_target
+    global player_proc, _current_rfid_uid, _current_target, _current_playlist_index
 
     # Salva la posizione prima di fermarsi (Smart Resume)
     _save_resume_if_needed()
@@ -134,6 +188,7 @@ def stop_player():
     # Azzera il tracciamento corrente
     _current_rfid_uid = None
     _current_target = None
+    _current_playlist_index = 0
 
     if proc:
         try:
@@ -146,6 +201,14 @@ def stop_player():
     if media_runtime.get("player_running"):
         media_runtime["player_running"] = False
         media_runtime["player_mode"] = "idle"
+        media_runtime["current_file"] = None
+        media_runtime["current_rfid_uid"] = None
+        media_runtime["current_rfid"] = None
+        media_runtime["current_profile_name"] = None
+        media_runtime["current_mode"] = "idle"
+        media_runtime["current_media_path"] = None
+        media_runtime["current_playlist"] = []
+        media_runtime["playlist_index"] = 0
 
         bus.mark_dirty("media")
         bus.request_emit("public")
@@ -184,6 +247,14 @@ def _player_watchdog_loop():
 
                     media_runtime["player_running"] = False
                     media_runtime["player_mode"] = "idle"
+                    media_runtime["current_file"] = None
+                    media_runtime["current_rfid_uid"] = None
+                    media_runtime["current_rfid"] = None
+                    media_runtime["current_profile_name"] = None
+                    media_runtime["current_mode"] = "idle"
+                    media_runtime["current_media_path"] = None
+                    media_runtime["current_playlist"] = []
+                    media_runtime["playlist_index"] = 0
 
                     bus.mark_dirty("media")
                     bus.request_emit("public")
@@ -191,6 +262,7 @@ def _player_watchdog_loop():
                     # Azzera lo stato di tracciamento e rimuove il processo zombie
                     _current_rfid_uid = None
                     _current_target = None
+                    _current_playlist_index = 0
                     player_proc = None
             except Exception as e:
                 log(f"Errore nel watchdog del player: {e}", "warning")
