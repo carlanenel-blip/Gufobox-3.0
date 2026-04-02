@@ -37,29 +37,43 @@ import { useAi } from './composables/useAi'
 import { useMedia } from './composables/useMedia'
 
 const { selectApiBase, connectSocket, disconnectSocket, apiReady, offline } = useApi()
-const { restoreSession, showAdmin } = useAuth()
+const { restoreSession, showAdmin, adminUnlocked } = useAuth()
 const { updateAiRuntime } = useAi()
 const { loadMediaStatus } = useMedia()
+
+async function onReconnect() {
+  // Ricarica stato media e, se la sessione admin era attiva, la verifica di nuovo
+  loadMediaStatus()
+  if (adminUnlocked.value) {
+    await restoreSession()
+  }
+}
 
 onMounted(async () => {
   // 1. Cerca l'IP del GufoBox sulla rete
   const found = await selectApiBase()
-  
+
   if (found) {
     // 2. Controlla se il genitore aveva già inserito il PIN in precedenza
     await restoreSession()
 
     // 3. Connette il Socket.io per ricevere dati in tempo reale dal Python
     connectSocket({
-      onConnect: () => {
-        console.log('🔗 Connesso al GufoBox!')
-        loadMediaStatus() // Forza un aggiornamento appena connesso
-      },
+      onConnect: onReconnect,
       onPublicSnapshot: (data) => {
-        // Quando il Python manda aggiornamenti, aggiorniamo il Gufetto!
         if (data?.ai_runtime) {
           updateAiRuntime(data.ai_runtime)
         }
+      },
+      onAdminSnapshot: (_data) => {
+        // Admin snapshot received — components polling their own endpoints
+        // will re-fetch via their own timers; no global store needed here
+      },
+      onJobsUpdate: (_data) => {
+        // Jobs update — individual job panels handle their own refresh
+      },
+      onOtaUpdate: (_data) => {
+        // OTA update — AdminSystem polls OTA status independently
       }
     })
   }

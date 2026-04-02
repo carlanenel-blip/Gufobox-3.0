@@ -1,71 +1,141 @@
 <template>
   <div class="admin-dashboard">
-    
+
     <div class="dashboard-header">
-      <h2>Stato del Sistema 📊</h2>
-      <button class="btn-refresh" @click="fetchSystemInfo" :disabled="loading">
-        {{ loading ? '🔄 Aggiornamento...' : '🔄 Aggiorna Ora' }}
+      <h2>Dashboard 📊</h2>
+      <button class="btn-refresh" @click="refreshAll" :disabled="loading">
+        {{ loading ? '🔄 Aggiornamento...' : '🔄 Aggiorna' }}
       </button>
     </div>
 
-    <div class="stats-grid" v-if="sysInfo">
-      
+    <!-- Offline banner -->
+    <div v-if="offline" class="offline-banner">
+      ⚠️ Backend non raggiungibile — modalità offline
+    </div>
+
+    <!-- Standby banner -->
+    <div v-if="summary && summary.in_standby" class="standby-banner">
+      🌙 <strong>GufoBox in standby</strong>
+    </div>
+
+    <!-- Hardware metrics grid -->
+    <div class="stats-grid" v-if="metrics">
+
       <div class="stat-card">
-        <div class="stat-icon cpu-icon">⚙️</div>
+        <div class="stat-icon">🌡️</div>
         <div class="stat-details">
           <h3>CPU</h3>
-          <p class="stat-value">{{ sysInfo.cpu_load || 0 }}%</p>
-          <p class="stat-sub">Temp: {{ sysInfo.cpu_temp || 'N/D' }}°C</p>
+          <p class="stat-value">
+            {{ metrics.cpu_temp_celsius != null ? metrics.cpu_temp_celsius + '°C' : 'N/D' }}
+          </p>
+          <p class="stat-sub" v-if="metrics.cpu_load">
+            Load: {{ metrics.cpu_load.load_1 ?? 'N/D' }}
+          </p>
         </div>
       </div>
 
       <div class="stat-card">
-        <div class="stat-icon ram-icon">🧠</div>
+        <div class="stat-icon">🧠</div>
         <div class="stat-details">
-          <h3>Memoria RAM</h3>
-          <p class="stat-value">{{ sysInfo.ram_used_mb || 0 }} / {{ sysInfo.ram_total_mb || 0 }} MB</p>
-          <div class="mini-progress">
-            <div class="mini-progress-fill" :style="{ width: (sysInfo.ram_percent || 0) + '%' }"></div>
+          <h3>RAM</h3>
+          <p class="stat-value">
+            {{ metrics.ram?.used_mb ?? '—' }} / {{ metrics.ram?.total_mb ?? '—' }} MB
+          </p>
+          <div class="mini-progress" v-if="metrics.ram?.percent != null">
+            <div class="mini-progress-fill" :style="{ width: metrics.ram.percent + '%' }"></div>
           </div>
         </div>
       </div>
 
       <div class="stat-card">
-        <div class="stat-icon disk-icon">💾</div>
+        <div class="stat-icon">💾</div>
         <div class="stat-details">
-          <h3>Spazio di Archiviazione</h3>
-          <p class="stat-value">{{ sysInfo.disk_used_gb || 0 }} / {{ sysInfo.disk_total_gb || 0 }} GB</p>
-          <div class="mini-progress">
-            <div class="mini-progress-fill disk-fill" :style="{ width: (sysInfo.disk_percent || 0) + '%' }"></div>
+          <h3>Disco</h3>
+          <p class="stat-value">
+            {{ metrics.disk?.used_gb ?? '—' }} / {{ metrics.disk?.total_gb ?? '—' }} GB
+          </p>
+          <div class="mini-progress" v-if="metrics.disk?.percent != null">
+            <div class="mini-progress-fill disk-fill" :style="{ width: metrics.disk.percent + '%' }"></div>
           </div>
         </div>
       </div>
 
       <div class="stat-card">
-        <div class="stat-icon time-icon">⏱️</div>
+        <div class="stat-icon">⏱️</div>
         <div class="stat-details">
-          <h3>Tempo di Attività</h3>
-          <p class="stat-value">{{ formatUptime(sysInfo.uptime_sec) }}</p>
-          <p class="stat-sub">Batteria: {{ sysInfo.battery_percent || '100' }}% 🔋</p>
+          <h3>Uptime</h3>
+          <p class="stat-value">{{ formatUptime(metrics.uptime_seconds) }}</p>
+          <p class="stat-sub" v-if="metrics.battery">
+            🔋 {{ metrics.battery.percent ?? '—' }}%
+          </p>
         </div>
       </div>
 
     </div>
 
-    <div v-else-if="!loading" class="error-state">
-      Impossibile caricare i dati di sistema.
+    <div v-else-if="!loading" class="empty-state">
+      Metriche hardware non disponibili.
     </div>
 
-    <div class="system-actions">
-      <h3>Controllo Alimentazione</h3>
-      <div class="action-buttons">
-        <button class="btn-power btn-reboot" @click="systemReboot">
-          🔄 Riavvia GufoBox
-        </button>
-        <button class="btn-power btn-shutdown" @click="systemShutdown">
-          ⏻ Spegni GufoBox
-        </button>
+    <!-- Status overview from diag/summary -->
+    <div class="status-grid" v-if="summary">
+
+      <div class="status-item" :class="summary.player_running ? 'status-ok' : 'status-idle'">
+        <span class="status-icon">🎵</span>
+        <div>
+          <p class="status-label">Media</p>
+          <p class="status-val">{{ summary.player_running ? summary.player_mode || 'In riproduzione' : 'Fermo' }}</p>
+        </div>
       </div>
+
+      <div class="status-item" :class="socketConnected ? 'status-ok' : 'status-error'">
+        <span class="status-icon">🔗</span>
+        <div>
+          <p class="status-label">Connessione</p>
+          <p class="status-val">{{ socketConnected ? 'Online' : 'Offline' }}</p>
+        </div>
+      </div>
+
+      <div class="status-item" :class="summary.ota_running ? 'status-warn' : 'status-idle'">
+        <span class="status-icon">⬆️</span>
+        <div>
+          <p class="status-label">OTA</p>
+          <p class="status-val">{{ summary.ota_running ? 'In corso...' : summary.ota_status || 'idle' }}</p>
+        </div>
+      </div>
+
+      <div class="status-item" :class="summary.active_jobs > 0 ? 'status-warn' : 'status-idle'">
+        <span class="status-icon">⚙️</span>
+        <div>
+          <p class="status-label">Job attivi</p>
+          <p class="status-val">{{ summary.active_jobs ?? 0 }}</p>
+        </div>
+      </div>
+
+      <div class="status-item" :class="summary.ok ? 'status-ok' : 'status-warn'">
+        <span class="status-icon">{{ summary.ok ? '✅' : '⚠️' }}</span>
+        <div>
+          <p class="status-label">Sistema</p>
+          <p class="status-val">{{ summary.ok ? 'OK' : (summary.warnings?.[0] || 'Avvisi presenti') }}</p>
+        </div>
+      </div>
+
+      <div class="status-item status-idle">
+        <span class="status-icon">💾</span>
+        <div>
+          <p class="status-label">Backup</p>
+          <p class="status-val">{{ summary.backup_count ?? '—' }} disponibili</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Warnings box -->
+    <div v-if="summary && summary.warnings && summary.warnings.length > 0" class="warnings-box">
+      <h4>⚠️ Avvisi</h4>
+      <ul>
+        <li v-for="w in summary.warnings" :key="w">{{ w }}</li>
+      </ul>
     </div>
 
   </div>
@@ -75,52 +145,39 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useApi } from '../../composables/useApi'
 
-const { guardedCall, getApi, extractApiError } = useApi()
+const { guardedCall, getApi, extractApiError, offline, socketConnected } = useApi()
 
-const sysInfo = ref(null)
+const metrics = ref(null)
+const summary = ref(null)
 const loading = ref(false)
 let pollingTimer = null
 
-// 1. Caricamento Dati
-async function fetchSystemInfo() {
+async function fetchMetrics() {
+  try {
+    const api = getApi()
+    const { data } = await guardedCall(() => api.get('/admin/metrics'))
+    metrics.value = data
+  } catch (e) {
+    console.warn('Metriche non disponibili:', extractApiError(e))
+  }
+}
+
+async function fetchSummary() {
+  try {
+    const api = getApi()
+    const { data } = await guardedCall(() => api.get('/diag/summary'))
+    summary.value = data
+  } catch (e) {
+    console.warn('Summary non disponibile:', extractApiError(e))
+  }
+}
+
+async function refreshAll() {
   loading.value = true
-  try {
-    const api = getApi()
-    // Chiamata fittizia: il backend Python dovrà esporre questo endpoint
-    const { data } = await guardedCall(() => api.get('/system/info'))
-    sysInfo.value = data
-  } catch (e) {
-    console.error('Errore lettura sistema:', extractApiError(e))
-  } finally {
-    loading.value = false
-  }
+  await Promise.all([fetchMetrics(), fetchSummary()])
+  loading.value = false
 }
 
-// 2. Comandi di Alimentazione
-async function systemReboot() {
-  if (!confirm('Vuoi davvero riavviare la GufoBox? La riproduzione si fermerà.')) return
-  try {
-    const api = getApi()
-    await guardedCall(() => api.post('/system/reboot'))
-    alert('Riavvio in corso... La pagina si ricaricherà tra poco.')
-    setTimeout(() => window.location.reload(), 15000)
-  } catch (e) {
-    alert(extractApiError(e, 'Errore comando riavvio'))
-  }
-}
-
-async function systemShutdown() {
-  if (!confirm('Vuoi spegnere definitivamente la GufoBox?')) return
-  try {
-    const api = getApi()
-    await guardedCall(() => api.post('/system/shutdown'))
-    alert('GufoBox in spegnimento. Puoi chiudere questa pagina.')
-  } catch (e) {
-    alert(extractApiError(e, 'Errore comando spegnimento'))
-  }
-}
-
-// 3. Utility
 function formatUptime(seconds) {
   if (!seconds) return '0h 0m'
   const h = Math.floor(seconds / 3600)
@@ -128,11 +185,9 @@ function formatUptime(seconds) {
   return `${h}h ${m}m`
 }
 
-// 4. Ciclo di Vita
 onMounted(() => {
-  fetchSystemInfo()
-  // Aggiorna le statistiche ogni 10 secondi
-  pollingTimer = setInterval(fetchSystemInfo, 10000)
+  refreshAll()
+  pollingTimer = setInterval(refreshAll, 15000)
 })
 
 onBeforeUnmount(() => {
@@ -144,7 +199,7 @@ onBeforeUnmount(() => {
 .admin-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: 25px;
 }
 
 .dashboard-header {
@@ -155,10 +210,7 @@ onBeforeUnmount(() => {
   padding-bottom: 15px;
 }
 
-.dashboard-header h2 {
-  margin: 0;
-  color: #fff;
-}
+.dashboard-header h2 { margin: 0; color: #fff; }
 
 .btn-refresh {
   background: #3a3a48;
@@ -170,114 +222,119 @@ onBeforeUnmount(() => {
   transition: background 0.2s;
 }
 
-.btn-refresh:hover:not(:disabled) {
-  background: #4a4a5a;
+.btn-refresh:hover:not(:disabled) { background: #4a4a5a; }
+.btn-refresh:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Offline / standby banners */
+.offline-banner {
+  background: #2a1a1a;
+  border: 1px solid #ff4d4d;
+  border-radius: 10px;
+  padding: 12px 18px;
+  color: #ff8a80;
+  font-size: 0.95rem;
 }
 
+.standby-banner {
+  background: #1e2a4a;
+  border: 1px solid #3f51b5;
+  border-radius: 10px;
+  padding: 12px 18px;
+  color: #8ab4f8;
+  font-size: 0.95rem;
+}
+
+/* Hardware metrics */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
 }
 
 .stat-card {
   background: #2a2a35;
   border-radius: 12px;
-  padding: 20px;
+  padding: 18px;
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 14px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.2);
 }
 
-.stat-icon {
-  font-size: 2.5rem;
-  width: 60px;
-  height: 60px;
+.stat-card .stat-icon {
+  font-size: 2rem;
+  width: 52px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #1e1e26;
-  border-radius: 12px;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
-.stat-details h3 {
-  margin: 0 0 5px 0;
-  font-size: 1rem;
-  color: #aaa;
-}
-
-.stat-value {
-  margin: 0;
-  font-size: 1.4rem;
-  font-weight: bold;
-  color: #fff;
-}
-
-.stat-sub {
-  margin: 5px 0 0 0;
-  font-size: 0.85rem;
-  color: #ffd27b;
-}
+.stat-details h3 { margin: 0 0 4px 0; font-size: 0.85rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { margin: 0; font-size: 1.25rem; font-weight: bold; color: #fff; }
+.stat-sub { margin: 4px 0 0 0; font-size: 0.8rem; color: #ffd27b; }
 
 .mini-progress {
   width: 100%;
-  height: 6px;
+  height: 5px;
   background: #1e1e26;
   border-radius: 3px;
   margin-top: 8px;
   overflow: hidden;
 }
 
-.mini-progress-fill {
-  height: 100%;
-  background: #4caf50;
-  transition: width 0.5s ease;
-}
-
+.mini-progress-fill { height: 100%; background: #4caf50; transition: width 0.5s ease; }
 .disk-fill { background: #3f51b5; }
 
-.system-actions {
-  background: #2a2a35;
-  border-radius: 12px;
-  padding: 20px;
-  border-left: 4px solid #ff9800;
+/* Status overview */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
 }
 
-.system-actions h3 {
-  margin-top: 0;
-  color: #fff;
-}
-
-.action-buttons {
+.status-item {
   display: flex;
-  gap: 15px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  background: #2a2a35;
+  border-radius: 10px;
+  padding: 14px;
+  border-left: 4px solid #555;
 }
 
-.btn-power {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 8px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  cursor: pointer;
-  color: white;
-  flex: 1;
-  min-width: 200px;
-  transition: opacity 0.2s;
+.status-ok { border-left-color: #4caf50; }
+.status-warn { border-left-color: #ff9800; }
+.status-error { border-left-color: #ff4d4d; }
+.status-idle { border-left-color: #555; }
+
+.status-icon { font-size: 1.5rem; flex-shrink: 0; }
+.status-label { margin: 0; font-size: 0.75rem; color: #aaa; text-transform: uppercase; }
+.status-val { margin: 2px 0 0 0; font-size: 0.95rem; font-weight: bold; color: #fff; }
+
+/* Warnings */
+.warnings-box {
+  background: #2a1e14;
+  border: 1px solid #ff9800;
+  border-radius: 10px;
+  padding: 16px 20px;
+  color: #ffd27b;
 }
 
-.btn-power:hover { opacity: 0.8; }
-.btn-reboot { background: #ff9800; }
-.btn-shutdown { background: #ff4d4d; }
+.warnings-box h4 { margin: 0 0 10px 0; }
+.warnings-box ul { margin: 0; padding-left: 20px; }
+.warnings-box li { margin-bottom: 4px; font-size: 0.9rem; }
 
-.error-state {
+.empty-state {
   text-align: center;
-  padding: 40px;
-  color: #ff4d4d;
+  padding: 30px;
+  color: #aaa;
   background: #2a2a35;
   border-radius: 12px;
+  font-style: italic;
 }
 </style>
 
