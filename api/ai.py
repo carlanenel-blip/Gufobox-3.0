@@ -161,6 +161,7 @@ def apply_rfid_edu_config(edu_config: dict) -> None:
     if age_group not in VALID_AGE_GROUPS:
         log_event("ai", "warning", "apply_rfid_edu_config: age_group non valido, uso bambino", {
             "received": age_group,
+            "valid": sorted(VALID_AGE_GROUPS),
         })
         age_group = "bambino"
 
@@ -168,6 +169,7 @@ def apply_rfid_edu_config(edu_config: dict) -> None:
     if activity_mode not in VALID_ACTIVITY_MODES:
         log_event("ai", "warning", "apply_rfid_edu_config: activity_mode non valido, uso free_conversation", {
             "received": activity_mode,
+            "valid": sorted(VALID_ACTIVITY_MODES),
         })
         activity_mode = "free_conversation"
 
@@ -175,6 +177,7 @@ def apply_rfid_edu_config(edu_config: dict) -> None:
     if language_target not in VALID_LANGUAGE_TARGETS:
         log_event("ai", "warning", "apply_rfid_edu_config: language_target non valido, uso english", {
             "received": language_target,
+            "valid": sorted(VALID_LANGUAGE_TARGETS),
         })
         language_target = "english"
 

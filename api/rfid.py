@@ -570,7 +570,7 @@ def _trigger_edu_ai(rfid_code, profile):
             "error": str(e),
         })
         bus.emit_notification("Errore nell'attivazione AI educativa.", "error")
-        return jsonify({"error": f"Errore attivazione AI educativa: {e}"}), 500
+        return jsonify({"error": "Errore attivazione AI educativa"}), 500
 
     # Track in ai_runtime
     ai_runtime["active_rfid"] = rfid_code

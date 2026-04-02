@@ -371,6 +371,26 @@ class TestUpdateEduAiProfile:
         })
         assert r.status_code == 400
 
+    def test_update_without_edu_config_preserves_existing(self, client, tmp_files):
+        """PUT without edu_config should preserve the existing edu_config (via merge)."""
+        client.post("/api/rfid/profile", json={
+            "rfid_code": "UP:00:00:03",
+            "name": "Orig",
+            "mode": "edu_ai",
+            "edu_config": {"age_group": "adulto", "activity_mode": "math", "learning_step": 3},
+        })
+        # Update only the name, no edu_config in payload
+        r = client.put("/api/rfid/profile/UP:00:00:03", json={
+            "rfid_code": "UP:00:00:03",
+            "name": "Renamed",
+        })
+        assert r.status_code == 200
+        body = r.get_json()
+        # edu_config from existing profile should be preserved via server-side merge
+        assert body["profile"]["edu_config"]["age_group"] == "adulto"
+        assert body["profile"]["edu_config"]["activity_mode"] == "math"
+        assert body["profile"]["edu_config"]["learning_step"] == 3
+
 
 # ---------------------------------------------------------------------------
 # E) POST /rfid/trigger mode=edu_ai — applies edu_config
