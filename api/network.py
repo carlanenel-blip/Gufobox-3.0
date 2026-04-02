@@ -316,7 +316,7 @@ def api_bluetooth_unblock():
         log(f"Bluetooth power on fallito: {err_bt}", "warning")
 
     if errors:
-        return jsonify({"status": "partial", "errors": errors})
+        return jsonify({"status": "partial", "error": "Sblocco Bluetooth parzialmente riuscito"})
 
     log("Bluetooth sbloccato e acceso", "info")
     return jsonify({"status": "ok"})
@@ -338,7 +338,7 @@ def api_bluetooth_pair():
     code_p, _, err_p = run_cmd(["bluetoothctl", "pair", mac], timeout=20)
     if code_p != 0:
         log(f"Bluetooth: pair {mac} fallito: {err_p}", "warning")
-        return jsonify({"error": f"Accoppiamento fallito per {mac}: {err_p}"}), 500
+        return jsonify({"error": f"Accoppiamento fallito per {mac}. Controlla che il dispositivo sia in modalità pairing."}), 500
 
     run_cmd(["bluetoothctl", "trust", mac], timeout=5)
     log(f"Bluetooth: {mac} accoppiato e trusted", "info")
