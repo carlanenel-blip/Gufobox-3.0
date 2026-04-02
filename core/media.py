@@ -174,6 +174,22 @@ def start_player(target, mode="audio_only", rfid_uid=None, playlist_index=0,
     log(f"▶️ Player avviato: {target} (Modo: {mode})", "info")
     return True, "ok"
 
+def _reset_media_runtime():
+    """Azzera i campi media_runtime quando il player si ferma e notifica EventBus."""
+    media_runtime["player_running"] = False
+    media_runtime["player_mode"] = "idle"
+    media_runtime["current_file"] = None
+    media_runtime["current_rfid_uid"] = None
+    media_runtime["current_rfid"] = None
+    media_runtime["current_profile_name"] = None
+    media_runtime["current_mode"] = "idle"
+    media_runtime["current_media_path"] = None
+    media_runtime["current_playlist"] = []
+    media_runtime["playlist_index"] = 0
+    bus.mark_dirty("media")
+    bus.request_emit("public")
+
+
 def stop_player():
     """Ferma il player in modo sicuro e pulito"""
     global player_proc, _current_rfid_uid, _current_target, _current_playlist_index
@@ -199,19 +215,7 @@ def stop_player():
 
     # Aggiorna lo stato globale solo se stava suonando
     if media_runtime.get("player_running"):
-        media_runtime["player_running"] = False
-        media_runtime["player_mode"] = "idle"
-        media_runtime["current_file"] = None
-        media_runtime["current_rfid_uid"] = None
-        media_runtime["current_rfid"] = None
-        media_runtime["current_profile_name"] = None
-        media_runtime["current_mode"] = "idle"
-        media_runtime["current_media_path"] = None
-        media_runtime["current_playlist"] = []
-        media_runtime["playlist_index"] = 0
-
-        bus.mark_dirty("media")
-        bus.request_emit("public")
+        _reset_media_runtime()
         log("⏹️ Player fermato manualmente", "info")
 
 def _player_watchdog_loop():
@@ -246,19 +250,7 @@ def _player_watchdog_loop():
                         except Exception as e:
                             log(f"Impossibile azzerare resume: {e}", "warning")
 
-                    media_runtime["player_running"] = False
-                    media_runtime["player_mode"] = "idle"
-                    media_runtime["current_file"] = None
-                    media_runtime["current_rfid_uid"] = None
-                    media_runtime["current_rfid"] = None
-                    media_runtime["current_profile_name"] = None
-                    media_runtime["current_mode"] = "idle"
-                    media_runtime["current_media_path"] = None
-                    media_runtime["current_playlist"] = []
-                    media_runtime["playlist_index"] = 0
-
-                    bus.mark_dirty("media")
-                    bus.request_emit("public")
+                    _reset_media_runtime()
 
                     # Azzera lo stato di tracciamento e rimuove il processo zombie
                     _current_rfid_uid = None

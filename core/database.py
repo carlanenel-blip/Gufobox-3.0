@@ -1,16 +1,49 @@
 import sqlite3
 import os
 import time
+import threading
 from datetime import datetime
 from config import DATA_DIR, RESUME_MAX_AGE_SEC
 from core.utils import log
 
 DB_PATH = os.path.join(DATA_DIR, "gufobox.db")
 
+# Thread-local storage per il riuso della connessione SQLite
+_tls = threading.local()
+
+
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """
+    Ritorna la connessione SQLite per il thread corrente, creandola se necessario.
+    La connessione viene riutilizzata ad ogni chiamata successiva dello stesso thread.
+    La prima chiamata abilita anche WAL per migliori performance concorrenti.
+    Se DB_PATH è cambiato (es. in test), la vecchia connessione viene chiusa e ricreata.
+    """
+    conn = getattr(_tls, "conn", None)
+    cached_path = getattr(_tls, "db_path", None)
+    if conn is None or cached_path != DB_PATH:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        _tls.conn = conn
+        _tls.db_path = DB_PATH
     return conn
+
+
+def close_db():
+    """Chiude la connessione SQLite del thread corrente (opzionale, usato allo shutdown)."""
+    conn = getattr(_tls, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _tls.conn = None
 
 def init_db():
     """Inizializza le tabelle del database se non esistono"""

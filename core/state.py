@@ -12,7 +12,7 @@ from config import (
     OTA_STATE_FILE, BACKUP_DIR,
 )
 from core.extensions import socketio
-from core.utils import log
+from core.utils import log, is_shutdown_requested
 
 _json_write_lock = threading.Lock()
 
@@ -140,10 +140,12 @@ def build_public_snapshot():
     # Include standby state (in-memory, not persisted)
     in_standby = False
     standby_state = "awake"
+    standby_details = None
     try:
-        from core.hardware import is_in_standby, get_standby_state
+        from core.hardware import is_in_standby, get_standby_state, get_standby_details
         in_standby = is_in_standby()
         standby_state = get_standby_state()
+        standby_details = get_standby_details()
     except Exception:
         pass
     payload = {
@@ -153,6 +155,7 @@ def build_public_snapshot():
         "led_runtime": led_runtime,
         "in_standby": in_standby,
         "standby_state": standby_state,
+        "standby_details": standby_details,
     }
     try:
         from core.wizard import get_wizard_state
@@ -224,31 +227,38 @@ class EventBus:
         socketio.emit("notification", {"message": message, "level": level})
 
     def _worker(self):
-        """Ciclo infinito che ogni tot secondi esegue i salvataggi accumulati."""
-        while True:
+        """Ciclo che ogni tot secondi esegue i salvataggi accumulati. Si ferma allo shutdown."""
+        while not is_shutdown_requested():
             eventlet.sleep(STATE_SAVE_DEBOUNCE_SEC)
-            to_save = set()
-            to_emit = set()
-            with self.lock:
-                to_save, self.dirty_files = self.dirty_files, set()
-                to_emit, self.pending_emits = self.pending_emits, set()
-            
-            # 1. Scritture fisiche su SD Card (raggruppate)
-            if "state" in to_save: save_json_direct(STATE_FILE, state)
-            if "media" in to_save: save_json_direct(MEDIA_RUNTIME_FILE, media_runtime)
-            if "led" in to_save: save_json_direct(LED_RUNTIME_FILE, led_runtime)
-            if "ai" in to_save: save_json_direct(AI_RUNTIME_FILE, ai_runtime)
-            if "alarms" in to_save: save_json_direct(ALARMS_FILE, alarms_list)
-            if "rfid_profiles" in to_save: save_json_direct(RFID_PROFILES_FILE, rfid_profiles)
-            if "rss" in to_save: save_json_direct(RSS_RUNTIME_FILE, rss_runtime)
+            self._flush()
+        # Ultimo flush prima di terminare
+        self._flush()
+        log("EventBus worker terminato (shutdown).", "info")
 
-            # 2. Aggiornamenti WebSocket verso Vue.js (raggruppati)
-            if "public" in to_emit:
-                socketio.emit("public_snapshot", build_public_snapshot())
-            if "admin" in to_emit:
-                socketio.emit("admin_snapshot", build_admin_snapshot())
-            if "jobs" in to_emit:
-                socketio.emit("jobs_update", {"jobs": get_jobs_list_sorted()})
+    def _flush(self):
+        """Esegue i salvataggi e le emissioni WebSocket accodate."""
+        to_save = set()
+        to_emit = set()
+        with self.lock:
+            to_save, self.dirty_files = self.dirty_files, set()
+            to_emit, self.pending_emits = self.pending_emits, set()
+
+        # 1. Scritture fisiche su SD Card (raggruppate)
+        if "state" in to_save: save_json_direct(STATE_FILE, state)
+        if "media" in to_save: save_json_direct(MEDIA_RUNTIME_FILE, media_runtime)
+        if "led" in to_save: save_json_direct(LED_RUNTIME_FILE, led_runtime)
+        if "ai" in to_save: save_json_direct(AI_RUNTIME_FILE, ai_runtime)
+        if "alarms" in to_save: save_json_direct(ALARMS_FILE, alarms_list)
+        if "rfid_profiles" in to_save: save_json_direct(RFID_PROFILES_FILE, rfid_profiles)
+        if "rss" in to_save: save_json_direct(RSS_RUNTIME_FILE, rss_runtime)
+
+        # 2. Aggiornamenti WebSocket verso Vue.js (raggruppati)
+        if "public" in to_emit:
+            socketio.emit("public_snapshot", build_public_snapshot())
+        if "admin" in to_emit:
+            socketio.emit("admin_snapshot", build_admin_snapshot())
+        if "jobs" in to_emit:
+            socketio.emit("jobs_update", {"jobs": get_jobs_list_sorted()})
 
 # Istanza globale utilizzata da tutto il progetto
 bus = EventBus()
