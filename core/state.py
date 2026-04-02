@@ -100,7 +100,15 @@ DEFAULT_LED_RUNTIME = {
     "master_brightness": 70,
     "master_speed": 30,
 }
-DEFAULT_AI_RUNTIME = {"is_speaking": False, "is_thinking": False, "history": []}
+DEFAULT_AI_RUNTIME = {
+    # Canonical state: idle | listening | thinking | speaking | error
+    "status": "idle",
+    # Legacy boolean fields kept for backward compatibility
+    "is_speaking": False,
+    "is_thinking": False,
+    "history": [],
+    "last_error": None,
+}
 
 state = load_json(STATE_FILE, DEFAULT_STATE)
 media_runtime = load_json(MEDIA_RUNTIME_FILE, DEFAULT_MEDIA_RUNTIME)

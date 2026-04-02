@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, send_file
 from config import AI_SETTINGS_FILE, AI_TTS_CACHE_DIR, OPENAI_API_KEY
 from core.state import ai_runtime, led_runtime, bus, load_json, save_json_direct
 from core.utils import log
+from core.event_log import log_event
 
 # Proviamo a importare OpenAI (se installato)
 try:
@@ -23,18 +24,40 @@ ai_settings = load_json(AI_SETTINGS_FILE, {
     "openai_api_key": OPENAI_API_KEY
 })
 
+# Canonical AI status values
+AI_STATUS_IDLE = "idle"
+AI_STATUS_LISTENING = "listening"
+AI_STATUS_THINKING = "thinking"
+AI_STATUS_SPEAKING = "speaking"
+AI_STATUS_ERROR = "error"
 
-def _set_ai_led_state(state):
+
+def _set_ai_state(status: str, error: str = None):
     """
-    Aggiorna lo stato AI nel runtime LED e ricalcola l'effetto effettivo.
-    state: "idle" | "listening" | "thinking" | "speaking" | "error" | None
+    Update the canonical AI status in ai_runtime and sync to LED runtime.
+
+    status: "idle" | "listening" | "thinking" | "speaking" | "error"
+    error:  optional error message (set when status == "error")
     """
+    ai_runtime["status"] = status
+    # Keep legacy boolean fields in sync for backward compat
+    ai_runtime["is_thinking"] = status == AI_STATUS_THINKING
+    ai_runtime["is_speaking"] = status == AI_STATUS_SPEAKING
+    if status == AI_STATUS_ERROR and error:
+        ai_runtime["last_error"] = error
+    elif status == AI_STATUS_IDLE:
+        ai_runtime["last_error"] = None
+    # Sync to LED layer (None when idle so LED reverts to default)
+    led_ai = status if status != AI_STATUS_IDLE else None
     try:
         from api.led import refresh_effective_led
-        led_runtime["ai_state"] = state
+        led_runtime["ai_state"] = led_ai
         refresh_effective_led()
     except Exception as e:
-        log(f"Errore aggiornamento LED per stato AI '{state}': {e}", "warning")
+        log(f"Errore aggiornamento LED per stato AI '{status}': {e}", "warning")
+    bus.mark_dirty("ai")
+    bus.request_emit("public")
+
 
 def get_openai_client():
     """Inizializza il client OpenAI usando la chiave salvata nelle impostazioni"""
@@ -70,6 +93,20 @@ def api_ai_settings_post():
     return jsonify({"status": "ok"})
 
 # =========================================================
+# STATUS AI
+# =========================================================
+@ai_bp.route("/ai/status", methods=["GET"])
+def api_ai_status():
+    """Return the current AI runtime status."""
+    return jsonify({
+        "status": ai_runtime.get("status", AI_STATUS_IDLE),
+        "last_error": ai_runtime.get("last_error"),
+        "history_length": len(ai_runtime.get("history", [])),
+        "tts_provider": ai_settings.get("tts_provider", "browser"),
+        "openai_configured": bool(ai_settings.get("openai_api_key") or OPENAI_API_KEY),
+    })
+
+# =========================================================
 # CHAT E CONVERSAZIONE
 # =========================================================
 @ai_bp.route("/ai/chat", methods=["POST"])
@@ -82,25 +119,31 @@ def api_ai_chat():
 
     client = get_openai_client()
     if not client:
-        return jsonify({"error": "OpenAI non configurato. Inserisci la API Key nelle impostazioni."}), 500
+        msg = "OpenAI non configurato. Inserisci la API Key nelle impostazioni."
+        log_event("ai", "error", "AI chat fallita: OpenAI non configurato")
+        return jsonify({"error": msg, "code": "openai_not_configured"}), 503
 
-    # 1. Aggiungiamo il messaggio dell'utente alla storia
-    ai_runtime["history"].append({"role": "user", "content": user_text})
+    # 1. Aggiungiamo il messaggio dell'utente alla storia con timestamp
+    import time as _time
+    ai_runtime["history"].append({
+        "role": "user",
+        "content": user_text,
+        "ts": int(_time.time()),
+    })
     
     # Manteniamo solo gli ultimi 10 messaggi per non consumare troppi token
     if len(ai_runtime["history"]) > 10:
         ai_runtime["history"] = ai_runtime["history"][-10:]
 
     # Segnaliamo al frontend che il gufetto sta pensando...
-    ai_runtime["is_thinking"] = True
-    bus.mark_dirty("ai")
-    bus.request_emit("public")
-    _set_ai_led_state("thinking")
+    _set_ai_state(AI_STATUS_THINKING)
 
     try:
         # 2. Prepariamo i messaggi per OpenAI
         messages = [{"role": "system", "content": ai_settings.get("system_prompt", "")}]
-        messages.extend(ai_runtime["history"])
+        # OpenAI expects only role/content fields
+        for h in ai_runtime["history"]:
+            messages.append({"role": h["role"], "content": h["content"]})
 
         # 3. Chiamata alle API di OpenAI
         response = client.chat.completions.create(
@@ -112,8 +155,15 @@ def api_ai_chat():
         
         ai_reply = response.choices[0].message.content.strip()
 
-        # 4. Salviamo la risposta nella storia
-        ai_runtime["history"].append({"role": "assistant", "content": ai_reply})
+        # 4. Salviamo la risposta nella storia con timestamp
+        ai_runtime["history"].append({
+            "role": "assistant",
+            "content": ai_reply,
+            "ts": int(_time.time()),
+        })
+        # Trim again to keep the cap at 10 (including the just-added reply)
+        if len(ai_runtime["history"]) > 10:
+            ai_runtime["history"] = ai_runtime["history"][-10:]
         
         # 5. Generiamo l'audio se il TTS provider è OpenAI
         audio_url = None
@@ -133,18 +183,15 @@ def api_ai_chat():
             audio_url = f"/api/ai/tts/{text_hash}.mp3"
 
     except Exception as e:
-        log(f"Errore OpenAI: {e}", "error")
-        ai_runtime["is_thinking"] = False
-        bus.mark_dirty("ai")
-        bus.request_emit("public")
-        _set_ai_led_state("error")
-        return jsonify({"error": str(e)}), 500
+        err_msg = str(e)
+        log(f"Errore OpenAI: {err_msg}", "error")
+        log_event("ai", "error", "Errore risposta OpenAI", {"error": err_msg[:200]})
+        _set_ai_state(AI_STATUS_ERROR, error=err_msg)
+        return jsonify({"error": "Errore del provider AI. Riprova tra poco."}), 500
 
-    # Fine elaborazione
-    ai_runtime["is_thinking"] = False
-    bus.mark_dirty("ai")
-    bus.request_emit("public")
-    _set_ai_led_state("speaking")
+    # Fine elaborazione: speaking se c'è audio OpenAI, altrimenti idle
+    next_state = AI_STATUS_SPEAKING if audio_url else AI_STATUS_IDLE
+    _set_ai_state(next_state)
 
     return jsonify({
         "status": "ok",
@@ -153,15 +200,45 @@ def api_ai_chat():
     })
 
 # =========================================================
+# STOP AI
+# =========================================================
+@ai_bp.route("/ai/stop", methods=["POST"])
+def api_ai_stop():
+    """Stop current AI activity and reset to idle."""
+    _set_ai_state(AI_STATUS_IDLE)
+    return jsonify({"status": "ok"})
+
+# =========================================================
+# LISTENING STATE (per STT browser)
+# =========================================================
+@ai_bp.route("/ai/listen/start", methods=["POST"])
+def api_ai_listen_start():
+    """Signal that the browser STT is starting (updates state to listening)."""
+    _set_ai_state(AI_STATUS_LISTENING)
+    return jsonify({"status": "ok"})
+
+@ai_bp.route("/ai/listen/stop", methods=["POST"])
+def api_ai_listen_stop():
+    """Signal that browser STT has stopped (revert to idle if still listening)."""
+    if ai_runtime.get("status") == AI_STATUS_LISTENING:
+        _set_ai_state(AI_STATUS_IDLE)
+    return jsonify({"status": "ok"})
+
+# =========================================================
 # PULIZIA STORIA E LETTURA AUDIO TTS
 # =========================================================
 @ai_bp.route("/ai/clear-history", methods=["POST"])
+@ai_bp.route("/ai/clear", methods=["POST"])
 def api_ai_clear_history():
-    ai_runtime["history"] = []
-    bus.mark_dirty("ai")
-    bus.request_emit("public")
-    bus.emit_notification("Memoria del Gufetto cancellata 🧹", "info")
-    return jsonify({"status": "ok"})
+    """Clear chat history and reset state. Accessible at both /ai/clear-history and /ai/clear."""
+    try:
+        ai_runtime["history"] = []
+        _set_ai_state(AI_STATUS_IDLE)
+        bus.emit_notification("Memoria del Gufetto cancellata 🧹", "info")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        log_event("ai", "error", "Reset chat fallito", {"error": str(e)})
+        return jsonify({"error": "Reset chat fallito"}), 500
 
 @ai_bp.route("/ai/tts/<filename>", methods=["GET"])
 def api_ai_tts_serve(filename):

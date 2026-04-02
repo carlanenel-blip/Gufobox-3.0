@@ -5,6 +5,44 @@
       <p>Configura i giochi educativi, le storie interattive e la personalità dell'assistente.</p>
     </div>
 
+    <!-- AI Status Bar -->
+    <div class="ai-status-bar">
+      <div class="status-indicator" :class="statusClass">
+        <span class="status-dot"></span>
+        <span class="status-label">{{ statusLabel }}</span>
+      </div>
+      <div class="status-actions">
+        <button
+          class="btn-stop"
+          @click="handleStop"
+          :disabled="currentStatus === 'idle'"
+          title="Ferma attività AI"
+        >⏹ Stop</button>
+        <button
+          class="btn-reset"
+          @click="handleResetChat"
+          :disabled="isResetting"
+          title="Cancella storico chat"
+        >🧹 Reset Chat</button>
+      </div>
+    </div>
+
+    <!-- Error / Warning Banner -->
+    <div v-if="errorMsg" class="banner banner-error">
+      <span>⚠️ {{ errorMsg }}</span>
+      <button class="banner-close" @click="errorMsg = null">✕</button>
+    </div>
+    <div v-if="successMsg" class="banner banner-success">
+      <span>✅ {{ successMsg }}</span>
+      <button class="banner-close" @click="successMsg = null">✕</button>
+    </div>
+    <div v-if="!speechSupported" class="banner banner-warning">
+      🎤 Il riconoscimento vocale non è supportato da questo browser. Usa l'input testuale.
+    </div>
+    <div v-if="!openaiConfigured" class="banner banner-warning">
+      🔑 OpenAI non configurato: le risposte AI non saranno disponibili. Aggiungi la API Key in Impostazioni AI.
+    </div>
+
     <div class="ai-grid">
       
       <div class="settings-panel card">
@@ -47,7 +85,11 @@
           
           <hr class="divider" />
 
-          <button class="btn-start-game" @click="startNewGame" :disabled="isThinking">
+          <button
+            class="btn-start-game"
+            @click="startNewGame"
+            :disabled="currentStatus === 'thinking' || isResetting"
+          >
             🔄 Avvia / Riavvia Gioco
           </button>
           
@@ -61,20 +103,26 @@
         <h3>Prova il Gioco! 🎮</h3>
         
         <div class="chat-history" ref="chatBox">
+          <!-- Empty state -->
+          <div v-if="chatHistory.length === 0" class="chat-empty">
+            <span>🦉</span>
+            <p>Nessun messaggio. Clicca su <strong>Avvia Gioco</strong> per iniziare!</p>
+          </div>
+
           <div 
             v-for="(msg, index) in chatHistory" 
             :key="index"
-            :class="['chat-bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
+            :class="['chat-bubble', msg.role === 'user' ? 'user-bubble' : (msg.role === 'error' ? 'error-bubble' : 'ai-bubble')]"
           >
-            <span class="avatar">{{ msg.role === 'user' ? '👦' : '🦉' }}</span>
+            <span class="avatar">{{ msg.role === 'user' ? '👦' : (msg.role === 'error' ? '⚠️' : '🦉') }}</span>
             <div class="message-content">
               <p>{{ msg.text }}</p>
-              
+              <span v-if="msg.ts" class="msg-timestamp">{{ formatTs(msg.ts) }}</span>
               <audio v-if="msg.audio_url" :src="msg.audio_url" controls class="mini-audio"></audio>
             </div>
           </div>
           
-          <div v-if="isThinking" class="chat-bubble ai-bubble thinking">
+          <div v-if="currentStatus === 'thinking'" class="chat-bubble ai-bubble thinking">
             <span class="avatar">🦉</span>
             <div class="message-content"><p>Uhm... fammi pensare... 🤔</p></div>
           </div>
@@ -86,9 +134,21 @@
             v-model="userInput" 
             placeholder="Scrivi la tua risposta qui..." 
             @keyup.enter="sendMessage"
-            :disabled="isThinking"
+            :disabled="currentStatus === 'thinking'"
           />
-          <button class="btn-send" @click="sendMessage" :disabled="isThinking || !userInput.trim()">
+          <button
+            v-if="speechSupported"
+            class="btn-mic"
+            :class="{ listening: isListeningLocal }"
+            @click="toggleMic"
+            :title="isListeningLocal ? 'Ferma microfono' : 'Parla'"
+            :disabled="currentStatus === 'thinking'"
+          >{{ isListeningLocal ? '🔴' : '🎤' }}</button>
+          <button
+            class="btn-send"
+            @click="sendMessage"
+            :disabled="currentStatus === 'thinking' || !userInput.trim()"
+          >
             Invia 🚀
           </button>
         </div>
@@ -99,14 +159,26 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useApi } from '../../composables/useApi'
 
 const { getApi, guardedCall } = useApi()
 
 const loading = ref(true)
-const isThinking = ref(false)
+const isResetting = ref(false)
 const chatBox = ref(null)
+
+const currentStatus = ref('idle')
+const lastError = ref(null)
+const openaiConfigured = ref(false)
+const speechSupported = ref(
+  typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+)
+const isListeningLocal = ref(false)
+let recognition = null
+
+const errorMsg = ref(null)
+const successMsg = ref(null)
 
 const settings = ref({
   age_profile: 'bambino',
@@ -114,13 +186,32 @@ const settings = ref({
   target_lang: 'en'
 })
 
-const chatHistory = ref([
-  { role: 'ai', text: "Ciao! Sono il Gufetto Magico. Scegli un gioco a sinistra e clicca su 'Avvia Gioco' per iniziare!" }
-])
-
+const chatHistory = ref([])
 const userInput = ref('')
 
-// --- GESTIONE IMPOSTAZIONI ---
+// ── Status helpers ──────────────────────────────────────────
+const STATUS_LABELS = {
+  idle: '⚪ In attesa',
+  listening: '🎤 In ascolto',
+  thinking: '💭 Elaborazione...',
+  speaking: '🔊 Risposta in riproduzione',
+  error: '🔴 Errore',
+}
+const statusLabel = computed(() => STATUS_LABELS[currentStatus.value] || currentStatus.value)
+const statusClass = computed(() => `status-${currentStatus.value}`)
+
+function formatTs(ts) {
+  if (!ts) return ''
+  const d = new Date(ts * 1000)
+  return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+}
+
+function showSuccess(msg, durationMs = 3000) {
+  successMsg.value = msg
+  setTimeout(() => { successMsg.value = null }, durationMs)
+}
+
+// ── Settings ────────────────────────────────────────────────
 async function loadSettings() {
   loading.value = true
   try {
@@ -129,11 +220,26 @@ async function loadSettings() {
     if (data.age_profile) settings.value.age_profile = data.age_profile
     if (data.interactive_mode) settings.value.interactive_mode = data.interactive_mode
     if (data.target_lang) settings.value.target_lang = data.target_lang
+    openaiConfigured.value = (!!(data.openai_api_key && !data.openai_api_key.includes('****')))
+      || (data.openai_configured === true)
   } catch (e) {
-    console.error("Errore caricamento impostazioni AI", e)
+    console.error('Errore caricamento impostazioni AI', e)
   } finally {
     loading.value = false
   }
+}
+
+async function loadStatus() {
+  try {
+    const api = getApi()
+    const { data } = await guardedCall(() => api.get('/ai/status'))
+    currentStatus.value = data.status || 'idle'
+    lastError.value = data.last_error || null
+    openaiConfigured.value = !!data.openai_configured
+    if (currentStatus.value === 'error' && lastError.value) {
+      errorMsg.value = `Errore AI: ${lastError.value}`
+    }
+  } catch (e) { console.error('Errore caricamento stato AI', e) }
 }
 
 async function autoSave() {
@@ -141,87 +247,200 @@ async function autoSave() {
     const api = getApi()
     await guardedCall(() => api.post('/ai/settings', settings.value))
   } catch (e) {
-    console.error("Errore salvataggio AI", e)
+    console.error('Errore salvataggio AI', e)
   }
 }
 
-// --- GESTIONE GIOCO E CHAT ---
+// ── Game / Chat ─────────────────────────────────────────────
 async function startNewGame() {
-  await autoSave() // Assicura che le impostazioni siano salvate
-  
-  // Svuota la storia del server
+  await autoSave()
+  isResetting.value = true
+  errorMsg.value = null
   try {
     const api = getApi()
     await guardedCall(() => api.post('/ai/clear-history'))
-  } catch(e) {}
-
-  chatHistory.value = []
-  
-  // Invia un prompt invisibile per far cominciare l'AI
-  let kickstartMessage = "Iniziamo il gioco! Fai la prima domanda o inizia la storia."
-  await sendToAI(kickstartMessage, true)
+    chatHistory.value = []
+    currentStatus.value = 'idle'
+    const kickstart = 'Iniziamo il gioco! Fai la prima domanda o inizia la storia.'
+    await sendToAI(kickstart, true)
+  } catch (e) {
+    errorMsg.value = 'Avvio gioco fallito. Riprova.'
+  } finally {
+    isResetting.value = false
+  }
 }
 
 async function sendMessage() {
   const text = userInput.value.trim()
   if (!text) return
-  
-  // Aggiunge visivamente il messaggio dell'utente
-  chatHistory.value.push({ role: 'user', text: text })
+  chatHistory.value.push({ role: 'user', text, ts: Math.floor(Date.now() / 1000) })
   userInput.value = ''
   scrollToBottom()
-
   await sendToAI(text, false)
 }
 
 async function sendToAI(text, isHiddenPrompt = false) {
-  isThinking.value = true
+  currentStatus.value = 'thinking'
+  errorMsg.value = null
   scrollToBottom()
-
   try {
     const api = getApi()
     const { data } = await guardedCall(() => api.post('/ai/chat', { text }))
-    
-    // Aggiunge la risposta dell'AI
-    chatHistory.value.push({ 
-      role: 'ai', 
+    chatHistory.value.push({
+      role: 'ai',
       text: data.reply,
-      audio_url: data.audio_url // Se configurato OpenAI TTS nel backend
+      audio_url: data.audio_url,
+      ts: Math.floor(Date.now() / 1000),
     })
-    
-    // Se è stato generato l'audio, proviamo a farlo partire in automatico
+    currentStatus.value = data.audio_url ? 'speaking' : 'idle'
     if (data.audio_url) {
       setTimeout(() => {
         const audios = document.querySelectorAll('audio')
-        if(audios.length > 0) audios[audios.length - 1].play().catch(e => console.log('Autoplay bloccato', e))
+        if (audios.length > 0) audios[audios.length - 1].play().catch(() => {})
       }, 100)
     }
-
   } catch (e) {
-    chatHistory.value.push({ role: 'ai', text: "Uhm... mi si sono arruffate le piume! C'è stato un errore di connessione. 🤕" })
+    currentStatus.value = 'error'
+    const msg = e?.response?.data?.error || 'Errore di connessione al Gufetto.'
+    chatHistory.value.push({
+      role: 'error',
+      text: msg,
+      ts: Math.floor(Date.now() / 1000),
+    })
+    errorMsg.value = msg
   } finally {
-    isThinking.value = false
     scrollToBottom()
+  }
+}
+
+// ── Controls ────────────────────────────────────────────────
+async function handleStop() {
+  try {
+    const api = getApi()
+    await guardedCall(() => api.post('/ai/stop'))
+    currentStatus.value = 'idle'
+    if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) {
+      window.speechSynthesis.cancel()
+    }
+  } catch (_) {}
+}
+
+async function handleResetChat() {
+  isResetting.value = true
+  errorMsg.value = null
+  try {
+    const api = getApi()
+    await guardedCall(() => api.post('/ai/clear-history'))
+    chatHistory.value = []
+    currentStatus.value = 'idle'
+    showSuccess('Storico chat cancellato.')
+  } catch (e) {
+    errorMsg.value = 'Reset chat fallito. Riprova.'
+  } finally {
+    isResetting.value = false
+  }
+}
+
+// ── Speech Recognition ───────────────────────────────────────
+function initSpeech() {
+  if (!speechSupported.value) return
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  recognition = new SR()
+  recognition.lang = 'it-IT'
+  recognition.interimResults = false
+  recognition.maxAlternatives = 1
+  recognition.onstart = () => { isListeningLocal.value = true }
+  recognition.onend = () => { isListeningLocal.value = false }
+  recognition.onerror = (e) => {
+    isListeningLocal.value = false
+    if (e.error === 'not-allowed') {
+      errorMsg.value = 'Microfono non autorizzato. Controlla i permessi del browser.'
+    } else if (e.error !== 'no-speech') {
+      errorMsg.value = `Errore microfono: ${e.error}`
+    }
+  }
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript
+    if (transcript) {
+      userInput.value = transcript
+      sendMessage()
+    }
+  }
+}
+
+function toggleMic() {
+  if (!recognition) return
+  errorMsg.value = null
+  if (isListeningLocal.value) {
+    recognition.stop()
+  } else {
+    recognition.start()
   }
 }
 
 function scrollToBottom() {
   nextTick(() => {
-    if (chatBox.value) {
-      chatBox.value.scrollTop = chatBox.value.scrollHeight
-    }
+    if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
   })
 }
 
 onMounted(() => {
   loadSettings()
+  loadStatus()
+  initSpeech()
 })
 </script>
 
 <style scoped>
-.admin-ai { display: flex; flex-direction: column; gap: 20px; height: 100%; }
+.admin-ai { display: flex; flex-direction: column; gap: 16px; height: 100%; }
 .header-section h2 { margin: 0; color: #fff; }
 .header-section p { color: #aaa; margin: 5px 0 0 0; }
+
+/* Status bar */
+.ai-status-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #2a2a35; border-radius: 10px; padding: 10px 16px; gap: 12px;
+  flex-wrap: wrap;
+}
+.status-indicator { display: flex; align-items: center; gap: 8px; font-weight: bold; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  background: #888;
+}
+.status-idle .status-dot    { background: #888; }
+.status-listening .status-dot { background: #42a5f5; animation: blink 1s infinite; }
+.status-thinking .status-dot  { background: #ffd27b; animation: pulse 1.2s infinite; }
+.status-speaking .status-dot  { background: #66bb6a; animation: pulse 1.2s infinite; }
+.status-error .status-dot    { background: #ef5350; }
+.status-idle .status-label    { color: #aaa; }
+.status-listening .status-label { color: #42a5f5; }
+.status-thinking .status-label  { color: #ffd27b; }
+.status-speaking .status-label  { color: #66bb6a; }
+.status-error .status-label    { color: #ef5350; }
+
+.status-actions { display: flex; gap: 8px; }
+.btn-stop, .btn-reset {
+  background: #3a3a48; border: 1px solid #555; color: #ccc;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+  transition: background 0.15s;
+}
+.btn-stop:hover:not(:disabled)  { background: #c62828; color: #fff; }
+.btn-reset:hover:not(:disabled) { background: #4a4a58; }
+.btn-stop:disabled, .btn-reset:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Banners */
+.banner {
+  display: flex; align-items: center; justify-content: space-between;
+  border-radius: 8px; padding: 10px 14px; font-size: 0.9rem;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-close {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 1rem; padding: 0 4px; opacity: 0.7;
+}
+.banner-close:hover { opacity: 1; }
 
 .ai-grid { 
   display: grid; 
@@ -247,7 +466,7 @@ onMounted(() => {
 }
 
 .divider { border: 0; height: 1px; background: #3a3a48; margin: 10px 0 20px 0; }
-.help-text { font-size: 0.85rem; color: #888; text-align: center;}
+.help-text { font-size: 0.85rem; color: #888; text-align: center; }
 
 .btn-start-game { 
   background: #4caf50; color: white; border: none; padding: 15px; 
@@ -255,17 +474,24 @@ onMounted(() => {
 }
 .btn-start-game:disabled { background: #555; cursor: not-allowed; }
 
-/* Chat Panel Destro */
+/* Chat Panel */
 .chat-history { 
   flex: 1; overflow-y: auto; padding: 15px; 
   background: #1e1e26; border-radius: 8px; margin-bottom: 15px;
   display: flex; flex-direction: column; gap: 15px;
 }
+.chat-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; color: #666; gap: 8px; text-align: center;
+}
+.chat-empty span { font-size: 2.5rem; }
+.chat-empty p { margin: 0; font-size: 0.9rem; }
 
 .chat-bubble { display: flex; gap: 15px; max-width: 85%; }
 .chat-bubble .avatar { font-size: 1.8rem; }
 .message-content { padding: 12px 18px; border-radius: 15px; font-size: 1.05rem; line-height: 1.4; }
-.message-content p { margin: 0; }
+.message-content p { margin: 0 0 4px; }
+.msg-timestamp { font-size: 0.72rem; color: #666; display: block; }
 
 .user-bubble { align-self: flex-end; flex-direction: row-reverse; }
 .user-bubble .message-content { background: #3f51b5; color: white; border-top-right-radius: 0; }
@@ -273,8 +499,10 @@ onMounted(() => {
 .ai-bubble { align-self: flex-start; }
 .ai-bubble .message-content { background: #3a3a48; color: #eee; border-top-left-radius: 0; }
 
+.error-bubble { align-self: flex-start; }
+.error-bubble .message-content { background: #3b1212; color: #ef9a9a; border-top-left-radius: 0; }
+
 .thinking .message-content { font-style: italic; color: #aaa; animation: pulse 1.5s infinite; }
-@keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
 
 .mini-audio { margin-top: 10px; height: 35px; width: 100%; border-radius: 20px; }
 
@@ -289,11 +517,23 @@ onMounted(() => {
   border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s;
 }
 .btn-send:disabled { background: #555; color: #888; }
+.btn-mic {
+  background: #3a3a48; border: 1px solid #555; color: #fff;
+  padding: 0 14px; border-radius: 8px; cursor: pointer; font-size: 1.2rem;
+  transition: background 0.15s;
+}
+.btn-mic.listening { background: #c62828; border-color: #ef5350; }
+.btn-mic:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Mobile Responsive */
+/* Animations */
+@keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* Mobile */
 @media (max-width: 900px) {
   .ai-grid { grid-template-columns: 1fr; }
   .chat-history { min-height: 350px; }
 }
 </style>
+
 
