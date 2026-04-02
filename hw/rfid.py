@@ -7,12 +7,22 @@ try:
 except ImportError:
     SimpleMFRC522 = None
 
+# Import diretto per evitare roundtrip HTTP locale (fallback al modulo api/rfid se disponibile)
+try:
+    from api.rfid import handle_rfid_trigger as _handle_rfid_trigger
+    _DIRECT_TRIGGER_AVAILABLE = True
+except Exception:
+    _handle_rfid_trigger = None
+    _DIRECT_TRIGGER_AVAILABLE = False
+
 API_BASE = "http://127.0.0.1:5000/api"
+
 
 def _trigger_rfid_direct(uid_str):
     """Chiama direttamente la logica Python invece di un roundtrip HTTP locale."""
-    from api.rfid import handle_rfid_trigger
-    return handle_rfid_trigger(uid_str)
+    if _DIRECT_TRIGGER_AVAILABLE and _handle_rfid_trigger is not None:
+        return _handle_rfid_trigger(uid_str)
+    return False
 
 
 def _trigger_rfid_http(uid_str):

@@ -7,6 +7,7 @@ eventlet.monkey_patch()
 
 from flask import Flask, send_from_directory
 from flask_cors import CORS
+from werkzeug.utils import safe_join
 
 # Importiamo la configurazione e le utility
 from config import SECRET_KEY, SESSION_COOKIE_SAMESITE, SESSION_COOKIE_SECURE, API_VERSION
@@ -90,9 +91,14 @@ def create_app():
         def serve_frontend(path):
             """Serve il frontend Vue buildato o l'index.html per SPA routing."""
             # Risorse statiche (js, css, img, ecc.) — serve il file direttamente
-            full_path = os.path.join(_FRONTEND_DIST, path)
-            if path and os.path.isfile(full_path):
-                return send_from_directory(_FRONTEND_DIST, path)
+            # Usa safe_join per prevenire path traversal attacks
+            if path:
+                try:
+                    safe_path = safe_join(_FRONTEND_DIST, path)
+                except Exception:
+                    safe_path = None
+                if safe_path and os.path.isfile(safe_path):
+                    return send_from_directory(_FRONTEND_DIST, path)
             # Catch-all per SPA: tutte le rotte non-API servono index.html
             return send_from_directory(_FRONTEND_DIST, "index.html")
     else:

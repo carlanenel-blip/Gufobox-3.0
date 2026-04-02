@@ -36,6 +36,7 @@ _lock = threading.Lock()
 _log_file: str | None = None  # set by _init_log_file() on first use
 _append_count: int = 0  # counts appends since last trim
 _append_count_for_file: str | None = None  # file path the counter is tracking
+_approx_total: int = 0  # estimated total events in the current file
 
 
 def _init_log_file() -> str:
@@ -128,18 +129,25 @@ def log_event(
     if details:
         event["details"] = details
 
-    global _append_count, _append_count_for_file
+    global _append_count, _append_count_for_file, _approx_total
     with _lock:
         current_file = _init_log_file()
-        # Reset counter if the log file has been swapped (e.g. in tests)
+        # Reset counters if the log file has been swapped (e.g. in tests)
         if _append_count_for_file != current_file:
             _append_count = 0
+            _approx_total = 0
             _append_count_for_file = current_file
         _append_raw(event)
         _append_count += 1
-        # Periodically trim to bounded size to avoid unbounded growth
-        if _append_count >= EVENT_LOG_TRIM_EVERY:
+        _approx_total += 1
+        # Trim periodically — but only when the file might actually exceed the max.
+        # This avoids an expensive full read+write when the file is still small.
+        if _append_count >= EVENT_LOG_TRIM_EVERY and _approx_total > EVENT_LOG_MAX_ENTRIES:
             _trim_if_needed()
+            _approx_total = EVENT_LOG_MAX_ENTRIES
+            _append_count = 0
+        elif _append_count >= EVENT_LOG_TRIM_EVERY:
+            # Reset count even if no trim was needed, to keep the interval regular
             _append_count = 0
 
 
@@ -158,7 +166,8 @@ def get_events(limit: int = 100) -> list[dict]:
 
 def clear_events() -> None:
     """Remove all stored events. Used mainly in tests."""
-    global _append_count
+    global _append_count, _approx_total
     with _lock:
         _write_raw([])
         _append_count = 0
+        _approx_total = 0
