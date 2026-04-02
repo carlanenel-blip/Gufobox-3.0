@@ -16,14 +16,136 @@ except ImportError:
 
 ai_bp = Blueprint('ai', __name__)
 
+# =========================================================
+# EDUCATIONAL AI CONSTANTS
+# =========================================================
+VALID_AGE_GROUPS = {"bambino", "ragazzo", "adulto"}
+VALID_ACTIVITY_MODES = {
+    "teaching_general",
+    "quiz",
+    "math",
+    "animal_sounds_games",
+    "interactive_story",
+    "foreign_languages",
+    "free_conversation",
+}
+VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french"}
+
+# Maps legacy interactive_mode values -> canonical activity_mode
+LEGACY_MODE_MAP = {
+    "chat_normale":       "free_conversation",
+    "storia_interattiva": "interactive_story",
+    "quiz_animali":       "animal_sounds_games",
+    "insegnante_lingue":  "foreign_languages",
+    "indovinelli":        "quiz",
+    "matematica":         "math",
+}
+
+# Maps legacy target_lang codes -> canonical language_target
+LEGACY_LANG_MAP = {
+    "en": "english",
+    "es": "spanish",
+    "de": "german",
+    "fr": "french",
+}
+
+# Reverse: canonical language_target -> legacy code
+LANG_TO_CODE = {v: k for k, v in LEGACY_LANG_MAP.items()}
+
+# Italian display names for languages
+LANGUAGE_NAMES_IT = {
+    "english": "inglese",
+    "spanish": "spagnolo",
+    "german":  "tedesco",
+    "french":  "francese",
+}
+
+# Activity mode display names (Italian)
+ACTIVITY_MODE_LABELS = {
+    "teaching_general":   "Insegnamento Generale",
+    "quiz":               "Quiz",
+    "math":               "Matematica",
+    "animal_sounds_games":"Animali e Versi",
+    "interactive_story":  "Storia Interattiva",
+    "foreign_languages":  "Lingue Straniere",
+    "free_conversation":  "Conversazione Libera",
+}
+
 # Carichiamo le impostazioni dell'AI (System prompt, voce, ecc.)
 ai_settings = load_json(AI_SETTINGS_FILE, {
     "system_prompt": "Sei il Gufetto Magico, un assistente amichevole e saggio che parla ai bambini.",
     "temperature": 0.7,
     "tts_provider": "browser",
-    "openai_api_key": OPENAI_API_KEY
+    "openai_api_key": OPENAI_API_KEY,
+    # Educational AI settings
+    "age_group": "bambino",
+    "activity_mode": "free_conversation",
+    "language_target": "english",
+    "learning_step": 1,
+    # Legacy aliases kept for backward compat
+    "age_profile": "bambino",
+    "interactive_mode": "chat_normale",
+    "target_lang": "en",
 })
 
+# =========================================================
+# EDUCATIONAL AI HELPERS
+# =========================================================
+
+def _get_edu_config():
+    """Return canonical (age_group, activity_mode, language_target, learning_step).
+    Reads new field names with fallback to legacy names for backward compat."""
+    age_group = ai_settings.get("age_group") or ai_settings.get("age_profile", "bambino")
+    if age_group not in VALID_AGE_GROUPS:
+        age_group = "bambino"
+
+    raw_mode = ai_settings.get("activity_mode") or ai_settings.get("interactive_mode", "free_conversation")
+    activity_mode = LEGACY_MODE_MAP.get(raw_mode, raw_mode)
+    if activity_mode not in VALID_ACTIVITY_MODES:
+        activity_mode = "free_conversation"
+
+    raw_lang = ai_settings.get("language_target") or ai_settings.get("target_lang", "english")
+    language_target = LEGACY_LANG_MAP.get(raw_lang, raw_lang)
+    if language_target not in VALID_LANGUAGE_TARGETS:
+        language_target = "english"
+
+    try:
+        learning_step = max(1, int(ai_settings.get("learning_step", 1)))
+    except (TypeError, ValueError):
+        learning_step = 1
+
+    return age_group, activity_mode, language_target, learning_step
+
+
+def _validate_edu_config(age_group, activity_mode, language_target, learning_step):
+    """Return list of error strings; empty list means config is valid."""
+    errors = []
+    if age_group not in VALID_AGE_GROUPS:
+        errors.append(f"age_group non valido: '{age_group}'. Valori: {sorted(VALID_AGE_GROUPS)}")
+    if activity_mode not in VALID_ACTIVITY_MODES:
+        errors.append(f"activity_mode non valido: '{activity_mode}'. Valori: {sorted(VALID_ACTIVITY_MODES)}")
+    if activity_mode == "foreign_languages" and language_target not in VALID_LANGUAGE_TARGETS:
+        errors.append(f"language_target non valido: '{language_target}'. Valori: {sorted(VALID_LANGUAGE_TARGETS)}")
+    if not isinstance(learning_step, int) or learning_step < 1:
+        errors.append("learning_step deve essere un intero >= 1")
+    return errors
+
+
+def _sync_legacy_edu_fields():
+    """Keep legacy field names in sync with canonical ones after a settings update."""
+    age_group = ai_settings.get("age_group", "bambino")
+    ai_settings["age_profile"] = age_group
+
+    activity_mode = ai_settings.get("activity_mode", "free_conversation")
+    # Store legacy mode name too (best-effort reverse map)
+    reverse_mode = {v: k for k, v in LEGACY_MODE_MAP.items()}
+    ai_settings["interactive_mode"] = reverse_mode.get(activity_mode, activity_mode)
+
+    language_target = ai_settings.get("language_target", "english")
+    ai_settings["target_lang"] = LANG_TO_CODE.get(language_target, language_target)
+
+
+# =========================================================
 # Canonical AI status values
 AI_STATUS_IDLE = "idle"
 AI_STATUS_LISTENING = "listening"
@@ -87,7 +209,40 @@ def api_ai_settings_post():
         if k == "openai_api_key" and "*" in str(v):
             continue
         ai_settings[k] = v
-        
+
+    # Normalize educational fields: accept both old and new names
+    # If new names were sent, canonicalize them; always sync legacy aliases
+    if "activity_mode" in data:
+        raw = ai_settings.get("activity_mode", "free_conversation")
+        ai_settings["activity_mode"] = LEGACY_MODE_MAP.get(raw, raw)
+        if ai_settings["activity_mode"] not in VALID_ACTIVITY_MODES:
+            ai_settings["activity_mode"] = "free_conversation"
+    elif "interactive_mode" in data:
+        raw = data["interactive_mode"]
+        ai_settings["activity_mode"] = LEGACY_MODE_MAP.get(raw, raw)
+        if ai_settings["activity_mode"] not in VALID_ACTIVITY_MODES:
+            ai_settings["activity_mode"] = "free_conversation"
+
+    if "language_target" in data:
+        raw = ai_settings.get("language_target", "english")
+        ai_settings["language_target"] = LEGACY_LANG_MAP.get(raw, raw)
+        if ai_settings["language_target"] not in VALID_LANGUAGE_TARGETS:
+            ai_settings["language_target"] = "english"
+    elif "target_lang" in data:
+        ai_settings["language_target"] = LEGACY_LANG_MAP.get(data["target_lang"], data["target_lang"])
+
+    if "age_profile" in data and "age_group" not in data:
+        ai_settings["age_group"] = data["age_profile"]
+
+    if ai_settings.get("age_group") not in VALID_AGE_GROUPS:
+        ai_settings["age_group"] = "bambino"
+
+    try:
+        ai_settings["learning_step"] = max(1, int(ai_settings.get("learning_step", 1)))
+    except (TypeError, ValueError):
+        ai_settings["learning_step"] = 1
+
+    _sync_legacy_edu_fields()
     save_json_direct(AI_SETTINGS_FILE, ai_settings)
     log("Impostazioni AI aggiornate", "info")
     return jsonify({"status": "ok"})
@@ -97,13 +252,20 @@ def api_ai_settings_post():
 # =========================================================
 @ai_bp.route("/ai/status", methods=["GET"])
 def api_ai_status():
-    """Return the current AI runtime status."""
+    """Return the current AI runtime status including educational config."""
+    age_group, activity_mode, language_target, learning_step = _get_edu_config()
     return jsonify({
         "status": ai_runtime.get("status", AI_STATUS_IDLE),
         "last_error": ai_runtime.get("last_error"),
         "history_length": len(ai_runtime.get("history", [])),
         "tts_provider": ai_settings.get("tts_provider", "browser"),
         "openai_configured": bool(ai_settings.get("openai_api_key") or OPENAI_API_KEY),
+        # Educational config
+        "age_group": age_group,
+        "activity_mode": activity_mode,
+        "activity_mode_label": ACTIVITY_MODE_LABELS.get(activity_mode, activity_mode),
+        "language_target": language_target,
+        "learning_step": learning_step,
     })
 
 # =========================================================
@@ -139,8 +301,10 @@ def api_ai_chat():
     _set_ai_state(AI_STATUS_THINKING)
 
     try:
-        # 2. Prepariamo i messaggi per OpenAI
-        messages = [{"role": "system", "content": ai_settings.get("system_prompt", "")}]
+        # 2. Prepariamo i messaggi per OpenAI usando il prompt educativo
+        age_group, activity_mode, language_target, learning_step = _get_edu_config()
+        system_prompt = ai_system_prompt(age_group, activity_mode, language_target, learning_step)
+        messages = [{"role": "system", "content": system_prompt}]
         # OpenAI expects only role/content fields
         for h in ai_runtime["history"]:
             messages.append({"role": h["role"], "content": h["content"]})
@@ -249,49 +413,282 @@ def api_ai_tts_serve(filename):
         return send_file(file_path, mimetype="audio/mpeg")
     return jsonify({"error": "File non trovato"}), 404
 
-def ai_age_profile_rules(age_profile):
-    """Regole di comunicazione basate sull'età"""
+# =========================================================
+# EDUCATIONAL CONFIG ENDPOINT
+# =========================================================
+@ai_bp.route("/ai/edu/config", methods=["GET"])
+def api_ai_edu_config_get():
+    """Return the current educational AI configuration."""
+    age_group, activity_mode, language_target, learning_step = _get_edu_config()
+    return jsonify({
+        "age_group": age_group,
+        "activity_mode": activity_mode,
+        "activity_mode_label": ACTIVITY_MODE_LABELS.get(activity_mode, activity_mode),
+        "language_target": language_target,
+        "language_target_label": LANGUAGE_NAMES_IT.get(language_target, language_target),
+        "learning_step": learning_step,
+        "valid_age_groups": sorted(VALID_AGE_GROUPS),
+        "valid_activity_modes": sorted(VALID_ACTIVITY_MODES),
+        "valid_language_targets": sorted(VALID_LANGUAGE_TARGETS),
+    })
+
+@ai_bp.route("/ai/edu/config", methods=["POST"])
+def api_ai_edu_config_post():
+    """Update the educational AI configuration with validation."""
+    data = request.get_json(silent=True) or {}
+
+    age_group = data.get("age_group", ai_settings.get("age_group", "bambino"))
+    raw_mode = data.get("activity_mode", ai_settings.get("activity_mode", "free_conversation"))
+    activity_mode = LEGACY_MODE_MAP.get(raw_mode, raw_mode)
+    raw_lang = data.get("language_target", ai_settings.get("language_target", "english"))
+    language_target = LEGACY_LANG_MAP.get(raw_lang, raw_lang)
+    try:
+        learning_step = max(1, int(data.get("learning_step", ai_settings.get("learning_step", 1))))
+    except (TypeError, ValueError):
+        learning_step = 1
+
+    errors = _validate_edu_config(age_group, activity_mode, language_target, learning_step)
+    if errors:
+        log_event("ai", "warning", "Configurazione educativa non valida", {"errors": errors})
+        return jsonify({"error": "Configurazione non valida", "details": errors}), 400
+
+    ai_settings["age_group"] = age_group
+    ai_settings["activity_mode"] = activity_mode
+    ai_settings["language_target"] = language_target
+    ai_settings["learning_step"] = learning_step
+    _sync_legacy_edu_fields()
+    save_json_direct(AI_SETTINGS_FILE, ai_settings)
+    log(f"AI educativa: {age_group} / {activity_mode} / {language_target} step {learning_step}", "info")
+
+    return jsonify({
+        "status": "ok",
+        "age_group": age_group,
+        "activity_mode": activity_mode,
+        "language_target": language_target,
+        "learning_step": learning_step,
+    })
+
+def ai_age_profile_rules(age_group):
+    """Communication style rules based on age group."""
     profiles = {
         "bambino": {
-            "style": "Usa frasi cortissime e semplici. Parla come a un bambino di 4 anni. Usa tanti emoji e onomatopee (Uhuu! Wow!). Non usare parole difficili."
+            "style": (
+                "Usa frasi cortissime e semplici. Parla come a un bambino piccolo. "
+                "Usa emoji e onomatopee (Uhuu! Wow! 🎉). Non usare parole difficili. "
+                "Sii sempre allegro e incoraggiante."
+            )
         },
         "ragazzo": {
-            "style": "Puoi usare frasi un po' più articolate. Fai battute simpatiche. Spiega le cose in modo curioso e coinvolgente."
+            "style": (
+                "Usa frasi chiare e un po' più articolate. Sii divertente e coinvolgente. "
+                "Fai domande per stimolare la curiosità. Spiega le cose in modo interessante."
+            )
         },
         "adulto": {
-            "style": "Parla in modo chiaro e amichevole. Puoi essere più dettagliato nelle spiegazioni."
-        }
+            "style": (
+                "Parla in modo chiaro, diretto e amichevole. Puoi essere dettagliato. "
+                "Tono maturo ma accessibile. Meno emoji, più sostanza."
+            )
+        },
     }
-    return profiles.get(age_profile, profiles["bambino"])
+    return profiles.get(age_group, profiles["bambino"])
 
-def ai_system_prompt(age_profile, interactive_mode="chat_normale", target_lang="it"):
-    rules = ai_age_profile_rules(age_profile)
-    
-    base = f"""Sei un piccolo gufetto magico, dolce e simpatico.
-Il tuo compito principale è intrattenere, educare e rassicurare.
-L'utente ha un'età stimata: {age_profile}.
-{rules['style']}
-"""
-    # Gestione Modalità Interattive (#14)
-    if interactive_mode == "quiz_animali":
-        base += "\nMODALITÀ GIOCO: Fai il verso di un animale scrivendolo (es. 'Miao!') e chiedi al bambino di indovinare quale animale è. Attendi la risposta e fai i complimenti!"
-    elif interactive_mode == "storia_interattiva":
-        base += "\nMODALITÀ STORIA: Inizia a raccontare una storia, poi fermati e fai scegliere al bambino tra due opzioni su come farla proseguire."
-    elif interactive_mode == "insegnante_lingue":
-        base += f"\nMODALITÀ LINGUA: Devi insegnare qualche parola in {target_lang}. Dì una parola semplice in italiano, poi dilla in {target_lang} e chiedi al bambino di ripeterla."
-    
-    base += "\n\nEvita contenuti spaventosi. Sii brevissimo (max 2-3 frasi)."
+
+def ai_system_prompt(age_group, activity_mode="free_conversation",
+                     language_target="english", learning_step=1):
+    """Build the educational system prompt based on age group, activity mode,
+    language target and learning step."""
+    age_group = age_group if age_group in VALID_AGE_GROUPS else "bambino"
+    activity_mode = LEGACY_MODE_MAP.get(activity_mode, activity_mode)
+    activity_mode = activity_mode if activity_mode in VALID_ACTIVITY_MODES else "free_conversation"
+    language_target = LEGACY_LANG_MAP.get(language_target, language_target)
+    language_target = language_target if language_target in VALID_LANGUAGE_TARGETS else "english"
+    try:
+        learning_step = max(1, int(learning_step))
+    except (TypeError, ValueError):
+        learning_step = 1
+
+    rules = ai_age_profile_rules(age_group)
+    base = (
+        f"Sei il Gufetto Magico, un assistente educativo simpatico e saggio.\n"
+        f"Il tuo compito è educare, intrattenere e rassicurare.\n"
+        f"Fascia utente: {age_group}.\n"
+        f"{rules['style']}\n"
+    )
+
+    if activity_mode == "teaching_general":
+        if age_group == "bambino":
+            base += (
+                "\nMODALITÀ INSEGNAMENTO: Spiega le cose in modo semplicissimo, come a un bambino piccolo. "
+                "Usa esempi concreti e metafore semplici. Frasi brevi. Tanto entusiasmo!"
+            )
+        elif age_group == "ragazzo":
+            base += (
+                "\nMODALITÀ INSEGNAMENTO: Spiega in modo chiaro e coinvolgente. "
+                "Usa analogie. Incoraggia le domande. Spiega il perché delle cose."
+            )
+        else:
+            base += (
+                "\nMODALITÀ INSEGNAMENTO: Fornisci spiegazioni complete e precise. "
+                "Puoi fare riferimenti culturali e tecnici. Tono diretto e informativo."
+            )
+
+    elif activity_mode == "quiz":
+        if age_group == "bambino":
+            base += (
+                "\nMODALITÀ QUIZ: Fai domande semplicissime con tono allegro e festoso. "
+                "Dai sempre un incoraggiamento anche se sbaglia. Usa 'Bravo!' e 'Wow!' spesso."
+            )
+        elif age_group == "ragazzo":
+            base += (
+                "\nMODALITÀ QUIZ: Fai domande interessanti su argomenti vari. "
+                "Sii divertente ma stimolante. Spiega la risposta corretta dopo ogni domanda."
+            )
+        else:
+            base += (
+                "\nMODALITÀ QUIZ: Proponi quiz su cultura generale, storia, scienza. "
+                "Tono diretto. Spiega le risposte in dettaglio."
+            )
+
+    elif activity_mode == "math":
+        if age_group == "bambino":
+            base += (
+                "\nMODALITÀ MATEMATICA: Proponi esercizi semplicissimi (addizioni e sottrazioni a una cifra). "
+                "Usa oggetti concreti ('hai 3 mele e ne mangi 1...'). Celebra ogni risposta giusta."
+            )
+        elif age_group == "ragazzo":
+            base += (
+                "\nMODALITÀ MATEMATICA: Proponi esercizi di livello medio (moltiplicazioni, divisioni, frazioni). "
+                "Spiega il procedimento passo dopo passo. Usa problemi pratici."
+            )
+        else:
+            base += (
+                "\nMODALITÀ MATEMATICA: Affronta argomenti più complessi (algebra, geometria, percentuali). "
+                "Spiega i concetti con rigore ma chiarezza. Tono diretto."
+            )
+
+    elif activity_mode == "animal_sounds_games":
+        if age_group == "bambino":
+            base += (
+                "\nMODALITÀ ANIMALI: Fai il verso di un animale (es. 'Miao! Miao!') e chiedi di indovinare. "
+                "Oppure descrivi l'animale in modo divertente. Usa onomatopee e tanto entusiasmo!"
+            )
+        elif age_group == "ragazzo":
+            base += (
+                "\nMODALITÀ ANIMALI: Proponi curiosità sugli animali (dove vivono, cosa mangiano). "
+                "Alterna giochi di versi con mini quiz sulle specie."
+            )
+        else:
+            base += (
+                "\nMODALITÀ ANIMALI: Condividi informazioni scientifiche sugli animali. "
+                "Puoi fare quiz naturalistici o curiosità zoologiche."
+            )
+
+    elif activity_mode == "interactive_story":
+        if age_group == "bambino":
+            base += (
+                "\nMODALITÀ STORIA: Racconta una storia magica e colorata. "
+                "Dopo 2-3 frasi fermati e chiedi: 'Cosa fa adesso il protagonista? Sceglie A) o B)?'. "
+                "Usa personaggi simpatici e situazioni fantastiche."
+            )
+        elif age_group == "ragazzo":
+            base += (
+                "\nMODALITÀ STORIA: Racconta una storia avventurosa o misteriosa. "
+                "Ad ogni scena chiedi di scegliere come proseguire tra due opzioni. "
+                "Crea suspense e momenti di sorpresa."
+            )
+        else:
+            base += (
+                "\nMODALITÀ STORIA: Proponi una storia narrativa complessa. "
+                "Fermati ai punti di svolta e chiedi come il protagonista dovrebbe reagire. "
+                "Tono narrativo maturo."
+            )
+
+    elif activity_mode == "foreign_languages":
+        lang_name = LANGUAGE_NAMES_IT.get(language_target, language_target)
+        if age_group == "bambino":
+            if learning_step <= 2:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Insegna parole basilari in {lang_name} (animali, colori, numeri 1-10, saluti). "
+                    f"Di' la parola in italiano, poi in {lang_name}, e chiedi di ripetere. "
+                    "Tono giocoso e pieno di incoraggiamenti."
+                )
+            elif learning_step <= 4:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Insegna frasi semplicissime in {lang_name} (ciao, come ti chiami, quanti anni hai). "
+                    "Usa ripetizione guidata. Tono festoso."
+                )
+            else:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Mini giochi di parole in {lang_name}. "
+                    "Indovina la parola, trova il contrario, completa la frase. Sempre in modo giocoso."
+                )
+        elif age_group == "ragazzo":
+            if learning_step <= 2:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Proponi vocabolario di base in {lang_name} con mini quiz lessicali. "
+                    "Chiedi di tradurre semplici frasi dall'italiano."
+                )
+            elif learning_step <= 4:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Proponi mini dialoghi in {lang_name}. "
+                    "Fai domande e aspetta la risposta. Correggi con gentilezza spiegando."
+                )
+            else:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Esercizi di comprensione in {lang_name}: leggi una frase e chiedi il significato, "
+                    "o riassumi un micro-testo."
+                )
+        else:  # adulto
+            if learning_step <= 2:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Insegna frasi pratiche in {lang_name} (viaggio, shopping, lavoro). "
+                    "Tono diretto, niente infantilizzazione."
+                )
+            elif learning_step <= 4:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Proponi dialoghi pratici in {lang_name} su situazioni reali. "
+                    "Correggi la grammatica quando necessario."
+                )
+            else:
+                base += (
+                    f"\nMODALITÀ LINGUE ({lang_name.upper()}) - Step {learning_step}: "
+                    f"Conversazione avanzata in {lang_name}. "
+                    "Argomenti di attualità, cultura, professione. Livello B1-B2."
+                )
+
+    # free_conversation: use only the age-group rules above (no extra instructions)
+
+    base += "\n\nEvita contenuti inappropriati. Sii conciso (max 3-4 frasi per risposta)."
     return base
 
 @ai_bp.route("/ai/play_game", methods=["POST"])
 def api_ai_start_game():
     data = request.get_json(silent=True) or {}
-    game_type = data.get("game_type", "quiz_animali") # quiz_animali, storia_interattiva, insegnante_lingue
-    lang = data.get("lang", "en") # en, es, de
-    
-    # Inizializza la conversazione con il prompt del gioco
-    prompt = ai_system_prompt(ai_settings.get("age_profile", "bambino"), game_type, lang)
-    # L'implementazione completa invierà questo prompt come primo messaggio al motore OpenAI...
-    
-    return jsonify({"status": "ok", "game_started": game_type})
+    # Accept both legacy and new field names
+    game_type = data.get("game_type") or data.get("activity_mode", "animal_sounds_games")
+    lang = data.get("lang") or data.get("language_target", "english")
+
+    age_group, activity_mode, language_target, learning_step = _get_edu_config()
+    # Allow per-request overrides
+    if game_type:
+        activity_mode = LEGACY_MODE_MAP.get(game_type, game_type)
+        if activity_mode not in VALID_ACTIVITY_MODES:
+            activity_mode = "animal_sounds_games"
+    if lang:
+        language_target = LEGACY_LANG_MAP.get(lang, lang)
+        if language_target not in VALID_LANGUAGE_TARGETS:
+            language_target = "english"
+
+    prompt = ai_system_prompt(age_group, activity_mode, language_target, learning_step)
+    # The prompt will be used by the next /ai/chat call via ai_settings
+    return jsonify({"status": "ok", "game_started": activity_mode, "prompt_preview": prompt[:120]})
 
