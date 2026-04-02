@@ -46,7 +46,7 @@
     <div class="ai-grid">
       
       <div class="settings-panel card">
-        <h3>Impostazioni Personalità</h3>
+        <h3>Impostazioni Educative 🎓</h3>
         
         <div v-if="loading" class="loading">Caricamento configurazione... ⏳</div>
         
@@ -54,7 +54,7 @@
           
           <div class="input-group">
             <label>Fascia d'Età</label>
-            <select v-model="settings.age_profile" @change="autoSave">
+            <select v-model="settings.age_group" @change="autoSave">
               <option value="bambino">🧒 Bambino (3-7 anni)</option>
               <option value="ragazzo">👦 Ragazzo (8-13 anni)</option>
               <option value="adulto">👨 Adulto / Genitore</option>
@@ -62,25 +62,47 @@
           </div>
 
           <div class="input-group">
-            <label>Modalità di Gioco / Attività</label>
-            <select v-model="settings.interactive_mode" @change="autoSave">
-              <option value="chat_normale">💬 Conversazione Libera</option>
-              <option value="storia_interattiva">📖 Storia a Bivi (Scegli tu il finale)</option>
-              <option value="quiz_animali">🦁 Gioco degli Animali (Indovina i versi)</option>
-              <option value="insegnante_lingue">🌍 Insegnante di Lingue (Ripeti le parole)</option>
-              <option value="indovinelli">❓ Indovinelli Magici</option>
-              <option value="matematica">🧮 Sfide di Matematica</option>
+            <label>Modalità Attività</label>
+            <select v-model="settings.activity_mode" @change="autoSave">
+              <option value="free_conversation">💬 Conversazione Libera</option>
+              <option value="teaching_general">📚 Insegnamento Generale</option>
+              <option value="interactive_story">📖 Storia Interattiva</option>
+              <option value="animal_sounds_games">🦁 Animali e Versi</option>
+              <option value="quiz">❓ Quiz</option>
+              <option value="math">🧮 Matematica</option>
+              <option value="foreign_languages">🌍 Lingue Straniere</option>
             </select>
           </div>
 
-          <div class="input-group" v-if="settings.interactive_mode === 'insegnante_lingue'">
-            <label>Lingua da Insegnare</label>
-            <select v-model="settings.target_lang" @change="autoSave">
-              <option value="en">🇬🇧 Inglese</option>
-              <option value="es">🇪🇸 Spagnolo</option>
-              <option value="de">🇩🇪 Tedesco</option>
-              <option value="fr">🇫🇷 Francese</option>
+          <!-- Mode description -->
+          <div class="mode-description" v-if="activeModeDescription">
+            <span class="mode-desc-icon">ℹ️</span>
+            <span>{{ activeModeDescription }}</span>
+          </div>
+
+          <div class="input-group" v-if="settings.activity_mode === 'foreign_languages'">
+            <label>Lingua da Imparare</label>
+            <select v-model="settings.language_target" @change="autoSave">
+              <option value="english">🇬🇧 Inglese</option>
+              <option value="spanish">🇪🇸 Spagnolo</option>
+              <option value="german">🇩🇪 Tedesco</option>
+              <option value="french">🇫🇷 Francese</option>
             </select>
+          </div>
+
+          <div class="input-group" v-if="settings.activity_mode === 'foreign_languages'">
+            <label>Step di Apprendimento (1–10)</label>
+            <div class="step-row">
+              <input
+                type="range"
+                v-model.number="settings.learning_step"
+                min="1" max="10" step="1"
+                @change="autoSave"
+                class="step-range"
+              />
+              <span class="step-badge">{{ settings.learning_step }}</span>
+            </div>
+            <span class="help-text-inline">{{ learningStepDescription }}</span>
           </div>
           
           <hr class="divider" />
@@ -90,11 +112,11 @@
             @click="startNewGame"
             :disabled="currentStatus === 'thinking' || isResetting"
           >
-            🔄 Avvia / Riavvia Gioco
+            🔄 Avvia / Riavvia Attività
           </button>
           
           <p class="help-text mt-3">
-            Modificando queste impostazioni, il Gufetto cambierà istantaneamente il modo in cui parla ai bambini.
+            Modificando queste impostazioni, il Gufetto adatterà il suo comportamento alla fascia d'età e alla modalità selezionata.
           </p>
         </div>
       </div>
@@ -181,9 +203,10 @@ const errorMsg = ref(null)
 const successMsg = ref(null)
 
 const settings = ref({
-  age_profile: 'bambino',
-  interactive_mode: 'storia_interattiva',
-  target_lang: 'en'
+  age_group: 'bambino',
+  activity_mode: 'free_conversation',
+  language_target: 'english',
+  learning_step: 1,
 })
 
 const chatHistory = ref([])
@@ -200,6 +223,27 @@ const STATUS_LABELS = {
 const statusLabel = computed(() => STATUS_LABELS[currentStatus.value] || currentStatus.value)
 const statusClass = computed(() => `status-${currentStatus.value}`)
 
+// Mode descriptions (Italian)
+const MODE_DESCRIPTIONS = {
+  free_conversation:   'Chat libera — il Gufetto risponde adattando il tono all\'età.',
+  teaching_general:    'Spiegazioni guidate, semplici o mature in base all\'età.',
+  interactive_story:   'Storia interattiva — il Gufetto racconta e chiede come proseguire.',
+  animal_sounds_games: 'Giochi sugli animali, versi e curiosità della natura.',
+  quiz:                'Domande e risposte guidate con tono adeguato all\'età.',
+  math:                'Esercizi matematici passo-passo, difficoltà adatta all\'età.',
+  foreign_languages:   'Insegnamento linguistico guidato a step: vocabolario, frasi, dialoghi.',
+}
+const activeModeDescription = computed(() => MODE_DESCRIPTIONS[settings.value.activity_mode] || '')
+
+const learningStepDescription = computed(() => {
+  const step = settings.value.learning_step
+  if (step <= 2) return 'Step 1–2: vocabolario di base e saluti'
+  if (step <= 4) return 'Step 3–4: frasi semplici e ripetizione guidata'
+  if (step <= 6) return 'Step 5–6: mini dialoghi e quiz lessicali'
+  if (step <= 8) return 'Step 7–8: dialoghi pratici e comprensione'
+  return 'Step 9–10: conversazione avanzata e temi complessi'
+})
+
 function formatTs(ts) {
   if (!ts) return ''
   const d = new Date(ts * 1000)
@@ -211,15 +255,30 @@ function showSuccess(msg, durationMs = 3000) {
   setTimeout(() => { successMsg.value = null }, durationMs)
 }
 
+// Legacy mode name -> canonical mapping (for backward compat with old saved settings)
+const LEGACY_MODE_MAP = {
+  chat_normale: 'free_conversation',
+  storia_interattiva: 'interactive_story',
+  quiz_animali: 'animal_sounds_games',
+  insegnante_lingue: 'foreign_languages',
+  indovinelli: 'quiz',
+  matematica: 'math',
+}
+const LEGACY_LANG_MAP = { en: 'english', es: 'spanish', de: 'german', fr: 'french' }
+
 // ── Settings ────────────────────────────────────────────────
 async function loadSettings() {
   loading.value = true
   try {
     const api = getApi()
     const { data } = await guardedCall(() => api.get('/ai/settings'))
-    if (data.age_profile) settings.value.age_profile = data.age_profile
-    if (data.interactive_mode) settings.value.interactive_mode = data.interactive_mode
-    if (data.target_lang) settings.value.target_lang = data.target_lang
+    // New canonical fields first, fall back to legacy names
+    settings.value.age_group = data.age_group || data.age_profile || 'bambino'
+    const rawMode = data.activity_mode || data.interactive_mode || 'free_conversation'
+    settings.value.activity_mode = LEGACY_MODE_MAP[rawMode] || rawMode
+    const rawLang = data.language_target || data.target_lang || 'english'
+    settings.value.language_target = LEGACY_LANG_MAP[rawLang] || rawLang
+    settings.value.learning_step = Math.max(1, parseInt(data.learning_step || 1, 10))
     openaiConfigured.value = (!!(data.openai_api_key && !data.openai_api_key.includes('****')))
       || (data.openai_configured === true)
   } catch (e) {
@@ -245,7 +304,12 @@ async function loadStatus() {
 async function autoSave() {
   try {
     const api = getApi()
-    await guardedCall(() => api.post('/ai/settings', settings.value))
+    await guardedCall(() => api.post('/ai/settings', {
+      age_group: settings.value.age_group,
+      activity_mode: settings.value.activity_mode,
+      language_target: settings.value.language_target,
+      learning_step: settings.value.learning_step,
+    }))
   } catch (e) {
     console.error('Errore salvataggio AI', e)
   }
@@ -467,6 +531,24 @@ onMounted(() => {
 
 .divider { border: 0; height: 1px; background: #3a3a48; margin: 10px 0 20px 0; }
 .help-text { font-size: 0.85rem; color: #888; text-align: center; }
+.help-text-inline { font-size: 0.8rem; color: #888; display: block; margin-top: 4px; }
+
+/* Mode description */
+.mode-description {
+  display: flex; align-items: flex-start; gap: 6px;
+  background: #1e2a35; border: 1px solid #2a4060; border-radius: 6px;
+  padding: 8px 12px; margin-bottom: 16px; font-size: 0.85rem; color: #9ec8e0;
+}
+.mode-desc-icon { flex-shrink: 0; }
+
+/* Learning step row */
+.step-row { display: flex; align-items: center; gap: 10px; }
+.step-range { flex: 1; accent-color: #4caf50; }
+.step-badge {
+  background: #3a3a48; color: #ffd27b; font-weight: bold;
+  border-radius: 6px; padding: 2px 10px; min-width: 32px; text-align: center;
+  font-size: 1rem;
+}
 
 .btn-start-game { 
   background: #4caf50; color: white; border: none; padding: 15px; 
