@@ -37,15 +37,25 @@ import { useAi } from './composables/useAi'
 import { useMedia } from './composables/useMedia'
 
 const { selectApiBase, connectSocket, disconnectSocket, apiReady, offline } = useApi()
-const { restoreSession, showAdmin, adminUnlocked } = useAuth()
+const { restoreSession, showAdmin, adminUnlocked, logoutAdmin } = useAuth()
 const { updateAiRuntime } = useAi()
 const { loadMediaStatus } = useMedia()
 
 async function onReconnect() {
-  // Ricarica stato media e, se la sessione admin era attiva, la verifica di nuovo
+  // Ricarica stato media dopo ogni reconnect
   loadMediaStatus()
-  if (adminUnlocked.value) {
-    await restoreSession()
+
+  // Se il pannello admin era aperto, ri-verifica la sessione.
+  // Se la sessione non è più valida (token scaduto / revocato dal server),
+  // restoreSession() imposta adminUnlocked=false e chiude il pannello automaticamente.
+  if (adminUnlocked.value || showAdmin.value) {
+    // restoreSession() returns true if the session is still authenticated,
+    // false if the token/session has expired or been revoked on the server.
+    const stillValid = await restoreSession()
+    if (!stillValid && showAdmin.value) {
+      // La sessione non è più valida: chiudi il pannello e forza logout locale
+      await logoutAdmin()
+    }
   }
 }
 

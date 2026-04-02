@@ -54,7 +54,7 @@ export function useMedia() {
     if (!apiReady.value) return
     try {
       const api = getApi()
-      const { data } = await guardedCall(() => api.get('/player/volume'))
+      const { data } = await guardedCall(() => api.get('/volume'))
       currentVolume.value = Number(data?.volume ?? 60)
     } catch (_) {}
   }
@@ -63,7 +63,7 @@ export function useMedia() {
     if (!apiReady.value) return
     try {
       const api = getApi()
-      const { data } = await guardedCall(() => api.post('/player/volume', { volume: currentVolume.value }))
+      const { data } = await guardedCall(() => api.post('/volume', { volume: currentVolume.value }))
       currentVolume.value = Number(data?.volume ?? currentVolume.value)
     } catch (e) {
       alert(extractApiError(e, 'Errore volume'))

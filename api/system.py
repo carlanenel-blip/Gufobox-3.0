@@ -17,6 +17,7 @@ system_bp = Blueprint('system', __name__)
 # HEALTH CHECK (usato dal HEALTHCHECK Docker)
 # =========================================================
 @system_bp.route("/ping", methods=["GET"])
+@system_bp.route("/health", methods=["GET"])
 def api_ping():
     """Endpoint minimale per health check."""
     return jsonify({"status": "ok"})
