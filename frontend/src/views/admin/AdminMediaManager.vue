@@ -6,8 +6,13 @@
     </div>
 
     <div class="media-grid">
-      
-      <div class="rfid-section card">
+      <!-- Feedback banner (above grid) -->
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType" style="grid-column: 1 / -1">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
+    <div class="rfid-section card">
         <h3>Statuine Associate</h3>
         
         <div v-if="loadingMap" class="loading">Caricamento statuine... ⏳</div>
@@ -80,8 +85,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, guardedCall, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 // Stato RFID
 const rfidMap = ref({})
@@ -111,25 +118,28 @@ async function loadRfidMap() {
 }
 
 async function saveMapping() {
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/rfid/map', newMapping.value))
-    alert("Statuina associata con successo! 🎉")
+    showSuccess('Statuina associata con successo.')
     newMapping.value = { uid: '', target: '', type: 'audio' }
     loadRfidMap()
   } catch (e) {
-    alert(extractApiError(e, "Errore associazione"))
+    showError(extractApiError(e, 'Errore associazione'))
   }
 }
 
 async function deleteMapping(uid) {
-  if (!confirm(`Seicuro di voler rimuovere la statuina ${uid}?`)) return
+  if (!confirm(`Rimuovere l'associazione per la statuina ${uid}?`)) return
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/rfid/delete', { uid }))
+    showSuccess(`Associazione "${uid}" rimossa.`)
     loadRfidMap()
   } catch (e) {
-    alert("Errore eliminazione")
+    showError(extractApiError(e, 'Errore eliminazione associazione'))
   }
 }
 
@@ -181,6 +191,23 @@ onMounted(() => {
 .admin-media { display: flex; flex-direction: column; gap: 20px; }
 .header-section h2 { margin: 0; color: #fff; }
 .header-section p { color: #aaa; margin: 5px 0 0 0; }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
 
 .media-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 

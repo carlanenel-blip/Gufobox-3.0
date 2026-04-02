@@ -5,6 +5,12 @@
       <p>Registra una storia o un messaggio per il bambino con la tua voce.</p>
     </div>
 
+    <!-- Feedback banner -->
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
     <div class="recorder-card">
       <div class="mic-container">
         <button 
@@ -36,7 +42,7 @@
           <div class="actions">
             <button class="btn-discard" @click="discardRecording">🗑️ Riprova</button>
             <button class="btn-save" @click="uploadRecording" :disabled="isUploading">
-              {{ isUploading ? 'Salvataggio...' : '💾 Salva sulla GufoBox' }}
+              {{ isUploading ? '⏳ Salvataggio...' : '💾 Salva sulla GufoBox' }}
             </button>
           </div>
         </div>
@@ -47,9 +53,11 @@
 
 <script setup>
 import { ref, onUnmounted } from 'vue'
-import { useApi } from '../../composables/useApi' // Usa il tuo composable API esistente
+import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 const isRecording = ref(false)
 const recordingTime = ref(0)
@@ -72,6 +80,7 @@ async function toggleRecording() {
 }
 
 async function startRecording() {
+  clearFeedback()
   try {
     // Richiede l'accesso al microfono
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -101,7 +110,7 @@ async function startRecording() {
     timerInterval = setInterval(() => { recordingTime.value++ }, 1000)
 
   } catch (err) {
-    alert('Errore: Impossibile accedere al microfono. Verifica i permessi del browser.')
+    showError('Impossibile accedere al microfono. Verifica i permessi del browser.')
     console.error(err)
   }
 }
@@ -124,6 +133,7 @@ function discardRecording() {
 async function uploadRecording() {
   if (audioChunks.length === 0) return
   isUploading.value = true
+  clearFeedback()
 
   const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
   const formData = new FormData()
@@ -137,10 +147,10 @@ async function uploadRecording() {
     // Siccome inviamo un file (FormData), Axios capisce da solo di usare multipart/form-data
     await api.post('/voice/upload', formData)
     
-    alert('Registrazione salvata con successo sulla GufoBox!')
+    showSuccess('Registrazione salvata sulla GufoBox.')
     discardRecording()
   } catch (err) {
-    alert(extractApiError(err, 'Errore durante il salvataggio'))
+    showError(extractApiError(err, 'Errore durante il salvataggio'))
   } finally {
     isUploading.value = false
   }
@@ -157,6 +167,23 @@ onUnmounted(() => {
 .admin-voice { display: flex; flex-direction: column; gap: 20px; }
 .header-section h2 { margin: 0; color: #fff; }
 .header-section p { color: #aaa; margin: 5px 0 0 0; }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
 
 .recorder-card {
   background: #2a2a35;
@@ -216,4 +243,3 @@ onUnmounted(() => {
 .btn-save { background: #4caf50; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
 .btn-save:disabled { background: #555; cursor: not-allowed; }
 </style>
-

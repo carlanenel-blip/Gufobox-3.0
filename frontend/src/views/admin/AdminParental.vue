@@ -7,7 +7,12 @@
 
     <div v-if="loading" class="loading-state">Caricamento impostazioni... ⏳</div>
 
-    <div v-else class="settings-card">
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
+    <div v-else-if="!loading" class="settings-card">
       <div class="status-header">
         <h3>Stato Parental Control</h3>
         <label class="switch">
@@ -73,8 +78,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, guardedCall, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 const loading = ref(true)
 const isSaving = ref(false)
@@ -101,12 +108,13 @@ async function loadSettings() {
 
 async function saveSettings() {
   isSaving.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/parental/settings', settings.value))
-    alert('Impostazioni Parental Control salvate con successo!')
+    showSuccess('Impostazioni Parental Control salvate.')
   } catch (e) {
-    alert(extractApiError(e, 'Errore durante il salvataggio'))
+    showError(extractApiError(e, 'Errore durante il salvataggio'))
   } finally {
     isSaving.value = false
   }
@@ -121,6 +129,23 @@ onMounted(() => {
 .admin-parental { display: flex; flex-direction: column; gap: 20px; }
 .header-section h2 { margin: 0; color: #fff; }
 .header-section p { color: #aaa; margin: 5px 0 0 0; }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
 
 .settings-card {
   background: #2a2a35; border-radius: 12px; padding: 25px;

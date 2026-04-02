@@ -296,12 +296,13 @@ class TestPowerActions:
         mock_standby.assert_called_once()
 
     def test_system_empty_action_returns_ok(self, system_client):
+        """Azione vuota deve restituire 400 (validazione input)."""
         rv = system_client.post(
             "/api/system",
             json={},
             content_type="application/json",
         )
-        assert rv.status_code == 200
+        assert rv.status_code == 400
 
 
 # ─── D) Standby state logic ───────────────────────────────────────────────────

@@ -6,6 +6,12 @@
       <p>Collega cuffie wireless o altoparlanti esterni alla tua GufoBox.</p>
     </div>
 
+    <!-- Feedback banner -->
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
     <div class="status-card">
       <div class="status-header">
         <div class="status-info">
@@ -34,24 +40,29 @@
       <div v-if="isBluetoothEnabled && connectedDevice" class="connected-device">
         <span class="device-icon">🎧</span>
         <div class="device-details">
-          <p class="device-name">{{ connectedDevice.name || 'Dispositivo Sconosciuto' }}</p>
+          <p class="device-name">{{ connectedDevice.name || 'Dispositivo sconosciuto' }}</p>
           <p class="device-mac">{{ connectedDevice.mac }}</p>
         </div>
-        <button class="btn-disconnect" @click="disconnectDevice">Disconnetti</button>
+        <button class="btn-disconnect" @click="disconnectDevice" :disabled="isBusy">🔌 Disconnetti</button>
       </div>
     </div>
 
-    <div v-if="isBluetoothEnabled && pairedDevices.length > 0" class="devices-card">
-      <h3>Dispositivi Ricordati</h3>
-      <div class="devices-list">
+    <div v-if="isBluetoothEnabled" class="devices-card">
+      <div class="card-header">
+        <h3>Dispositivi Ricordati</h3>
+      </div>
+      <div v-if="pairedDevices.length === 0" class="empty-state">
+        Nessun dispositivo salvato. Accoppia un dispositivo dalla sezione qui sotto.
+      </div>
+      <div v-else class="devices-list">
         <div v-for="dev in pairedDevices" :key="dev.mac" class="device-item">
           <div class="device-info">
             <span class="device-name">{{ dev.name || dev.mac }}</span>
             <span class="device-mac">{{ dev.mac }}</span>
           </div>
           <div class="device-actions">
-            <button class="btn-connect" @click="() => connectDevice(dev.mac)" :disabled="isBusy">Connetti</button>
-            <button class="btn-forget" @click="() => forgetDevice(dev.mac)" :disabled="isBusy">Dimentica</button>
+            <button class="btn-connect" @click="() => connectDevice(dev.mac)" :disabled="isBusy">🔗 Connetti</button>
+            <button class="btn-forget" @click="() => forgetDevice(dev.mac)" :disabled="isBusy">🗑️ Dimentica</button>
           </div>
         </div>
       </div>
@@ -61,16 +72,16 @@
       <div class="card-header">
         <h3>Aggiungi Nuovo Dispositivo</h3>
         <button class="btn-scan" @click="scanDevices" :disabled="isScanning || isBusy">
-          {{ isScanning ? 'Ricerca in corso... 📡' : '🔄 Cerca Cuffie/Casse' }}
+          {{ isScanning ? '📡 Ricerca in corso...' : '🔄 Cerca Cuffie/Casse' }}
         </button>
       </div>
 
       <div v-if="isScanning" class="loading-state">
-        Metti le tue cuffie o la cassa in modalità "Pairing" (luce lampeggiante)...
+        Metti le tue cuffie o la cassa in modalità "Pairing" (luce lampeggiante blu)...
       </div>
       
-      <div v-else-if="discoveredDevices.length === 0" class="empty-state">
-        Nessun nuovo dispositivo trovato nelle vicinanze.
+      <div v-else-if="discoveredDevices.length === 0 && !isScanning" class="empty-state">
+        Nessun dispositivo trovato. Attiva la modalità pairing e clicca "Cerca Cuffie/Casse".
       </div>
 
       <div v-else class="devices-list">
@@ -117,8 +128,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, guardedCall, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 // Stato
 const loadingStatus = ref(false)
@@ -169,7 +182,7 @@ async function toggleBluetooth() {
       discoveredDevices.value = []
     }
   } catch (e) {
-    alert(extractApiError(e, 'Errore accensione/spegnimento Bluetooth'))
+    showError(extractApiError(e, 'Errore accensione/spegnimento Bluetooth'))
     isBluetoothEnabled.value = !isBluetoothEnabled.value // Revert
   }
 }
@@ -182,11 +195,12 @@ async function unblockBluetooth() {
     const { data } = await guardedCall(() => api.post('/bluetooth/unblock'))
     if (data?.status === 'ok') {
       await loadBluetoothStatus()
+      showSuccess('Bluetooth sbloccato con successo.')
     } else {
-      alert('Sblocco parzialmente riuscito. Controlla il log per i dettagli.')
+      showError('Sblocco parzialmente riuscito. Controlla il log per i dettagli.')
     }
   } catch (e) {
-    alert(extractApiError(e, 'Errore sblocco Bluetooth'))
+    showError(extractApiError(e, 'Errore sblocco Bluetooth'))
   } finally {
     isBusy.value = false
   }
@@ -196,12 +210,13 @@ async function unblockBluetooth() {
 async function scanDevices() {
   isScanning.value = true
   discoveredDevices.value = []
+  clearFeedback()
   try {
     const api = getApi()
     const { data } = await guardedCall(() => api.get('/bluetooth/scan'))
     discoveredDevices.value = data?.devices || []
   } catch (e) {
-    alert(extractApiError(e, 'Errore durante la scansione'))
+    showError(extractApiError(e, 'Errore durante la scansione'))
   } finally {
     isScanning.value = false
   }
@@ -210,13 +225,14 @@ async function scanDevices() {
 // 5. Accoppia (pair only)
 async function pairDevice(mac) {
   isBusy.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/bluetooth/pair', { mac }))
-    alert(`Dispositivo ${mac} accoppiato con successo!`)
+    showSuccess(`Dispositivo accoppiato con successo.`)
     await loadBluetoothStatus()
   } catch (e) {
-    alert(extractApiError(e, `Impossibile accoppiare ${mac}`))
+    showError(extractApiError(e, `Accoppiamento fallito. Assicurati che il dispositivo sia in modalità pairing.`))
   } finally {
     isBusy.value = false
   }
@@ -225,14 +241,15 @@ async function pairDevice(mac) {
 // 6. Connetti
 async function connectDevice(mac) {
   isBusy.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/bluetooth/connect', { mac }))
-    alert('Connessione stabilita!')
+    showSuccess('Connessione stabilita.')
     await loadBluetoothStatus()
     discoveredDevices.value = []
   } catch (e) {
-    alert(extractApiError(e, 'Impossibile connettersi. Assicurati che il dispositivo sia acceso.'))
+    showError(extractApiError(e, 'Connessione fallita. Verifica che il dispositivo sia acceso e vicino.'))
   } finally {
     isBusy.value = false
   }
@@ -242,12 +259,14 @@ async function connectDevice(mac) {
 async function disconnectDevice() {
   if (!connectedDevice.value) return
   isBusy.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/bluetooth/disconnect'))
     connectedDevice.value = null
+    showSuccess('Dispositivo disconnesso.')
   } catch (e) {
-    alert(extractApiError(e, 'Errore disconnessione'))
+    showError(extractApiError(e, 'Errore disconnessione'))
   } finally {
     isBusy.value = false
   }
@@ -257,12 +276,14 @@ async function disconnectDevice() {
 async function forgetDevice(mac) {
   if (!confirm('Vuoi davvero dimenticare questo dispositivo?')) return
   isBusy.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/bluetooth/forget', { mac }))
+    showSuccess('Dispositivo rimosso.')
     await loadBluetoothStatus()
   } catch (e) {
-    alert(extractApiError(e, 'Errore rimozione dispositivo'))
+    showError(extractApiError(e, 'Errore rimozione dispositivo'))
   } finally {
     isBusy.value = false
   }
@@ -274,7 +295,7 @@ async function toggleSourceMode() {
     const api = getApi()
     await guardedCall(() => api.post('/bluetooth/source-mode', { enabled: sourceModeEnabled.value }))
   } catch (e) {
-    alert(extractApiError(e, 'Errore toggle modalità speaker'))
+    showError(extractApiError(e, 'Errore toggle modalità speaker'))
     sourceModeEnabled.value = !sourceModeEnabled.value // Revert
   }
 }
@@ -294,6 +315,23 @@ onMounted(() => {
 
 .header-section h2 { margin: 0; color: #fff; }
 .header-section p { color: #aaa; margin: 5px 0 0 0; }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
 
 .status-card, .devices-card {
   background: #2a2a35;
