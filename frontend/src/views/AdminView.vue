@@ -63,6 +63,11 @@
           <span class="nav-label">Bluetooth</span>
         </button>
 
+        <button @click="currentTab = 'audio'" :class="{ active: currentTab === 'audio' }">
+          <span class="nav-icon">🔊</span>
+          <span class="nav-label">Audio</span>
+        </button>
+
         <button @click="currentTab = 'system'" :class="{ active: currentTab === 'system' }">
           <span class="nav-icon">⚙️</span>
           <span class="nav-label">Sistema</span>
@@ -112,6 +117,8 @@
 
           <AdminBluetooth v-if="currentTab === 'bluetooth'" />
 
+          <AdminAudio v-if="currentTab === 'audio'" />
+
           <AdminSystem v-if="currentTab === 'system'" />
 
           <AdminDiagnostics v-if="currentTab === 'diag'" />
@@ -137,6 +144,7 @@ import AdminStats from './admin/AdminStats.vue'
 import AdminAiSettings from './admin/AdminAiSettings.vue'
 import AdminNetwork from './admin/AdminNetwork.vue'
 import AdminBluetooth from './admin/AdminBluetooth.vue'
+import AdminAudio from './admin/AdminAudio.vue'
 import AdminRfid from './admin/AdminRfid.vue'
 import AdminLed from './admin/AdminLed.vue'
 import AdminSystem from './admin/AdminSystem.vue'

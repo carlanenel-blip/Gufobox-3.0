@@ -305,6 +305,9 @@ def api_diag_summary():
         "active_jobs": active_jobs,
         "alarm_count": alarm_count,
         "readiness": readiness,
+        # Audio readiness quick-access (anche disponibile in readiness.audio)
+        "audio_ready": readiness["audio"].get("ok", False),
+        "audio_note": readiness["audio"].get("note"),
     })
 
 
@@ -315,8 +318,8 @@ def api_diag_tools():
     """
     tools = [
         "mpv", "ffmpeg", "git", "pip", "python3",
-        "nmcli", "rfkill", "amixer", "aplay",
-        "reboot", "shutdown", "cpufreq-set",
+        "nmcli", "rfkill", "amixer", "aplay", "pactl",
+        "reboot", "shutdown", "cpufreq-set", "vcgencmd",
         "bluetoothctl",
     ]
     result = {tool: _check_tool(tool) for tool in tools}
