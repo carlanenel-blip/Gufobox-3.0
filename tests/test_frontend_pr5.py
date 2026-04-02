@@ -200,6 +200,6 @@ def test_system_post_standby_action(client):
 
 
 def test_system_post_unknown_action_returns_ok(client):
-    """Azione sconosciuta non deve causare un 5xx."""
+    """Azione sconosciuta deve restituire 400 (non 5xx)."""
     rv = client.post("/api/system", json={"azione": "unknown_action"})
-    assert rv.status_code == 200
+    assert rv.status_code == 400

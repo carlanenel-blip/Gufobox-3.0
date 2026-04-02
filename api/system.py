@@ -53,8 +53,8 @@ def api_system():
         bus.emit_notification("Spegnimento in corso... 🔌", "warning")
         run_cmd(["sudo", "shutdown", "-h", "now"])
         return jsonify({"status": "ok", "message": t("ok_shutdown")})
-        
-    return jsonify({"status": "ok"})
+
+    return jsonify({"error": "Azione non riconosciuta. Valori consentiti: standby, reboot, shutdown"}), 400
 
 # =========================================================
 # SLEEP TIMER (Spegnimento automatico)

@@ -6,9 +6,15 @@
       <p>Gestisci i profili avanzati delle statuine: cartella media, webradio, AI, feed RSS.</p>
     </div>
 
+    <!-- Feedback banner -->
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
     <!-- FORM PROFILO COMPLETO -->
     <div class="rfid-form-card">
-      <h3>{{ isEditing ? '\u270f\ufe0f Modifica Profilo' : '\u2795 Nuovo Profilo Statuina' }}</h3>
+      <h3>{{ isEditing ? '✏️ Modifica Profilo' : '➕ Nuovo Profilo Statuina' }}</h3>
 
       <div class="form-grid-2">
         <div class="form-group">
@@ -16,9 +22,10 @@
           <div class="uid-input-group">
             <input type="text" v-model="form.rfid_code" placeholder="Es. AA:BB:CC:DD" :disabled="isEditing" />
             <button class="btn-scan" @click="waitForScan" :class="{ scanning: isScanning }">
-              {{ isScanning ? 'In ascolto... \ud83d\udce1' : '\ud83d\udd0d Scansiona' }}
+              {{ isScanning ? '📡 In ascolto...' : '🔍 Scansiona' }}
             </button>
           </div>
+          <p v-if="isScanning" class="scan-hint">Avvicina la statuina al lettore RFID...</p>
         </div>
         <div class="form-group">
           <label>Nome</label>
@@ -174,8 +181,10 @@
         <h3>Profili Configurati</h3>
         <button class="btn-refresh" @click="loadProfiles">\ud83d\udd04</button>
       </div>
-      <div v-if="loading" class="loading-state">Caricamento... \u23f3</div>
-      <div v-else-if="profiles.length === 0" class="empty-state">Nessun profilo configurato.</div>
+      <div v-if="loading" class="loading-state">Caricamento... ⏳</div>
+      <div v-else-if="profiles.length === 0" class="empty-state">
+        Nessun profilo configurato. Usa il form qui sopra per aggiungere la prima statuina.
+      </div>
       <div v-else class="rfid-grid">
         <div v-for="p in profiles" :key="p.rfid_code" class="rfid-item"
              :class="{ active: currentRfid?.current_rfid === p.rfid_code, disabled: !p.enabled }">
@@ -203,8 +212,10 @@
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, getSocket, guardedCall, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 const profiles = ref([])
 const loading = ref(false)
@@ -261,14 +272,24 @@ async function saveProfile() {
 }
 
 async function deleteProfile(code) {
-  if (!confirm(`Eliminare ${code}?`)) return
-  try { await guardedCall(() => getApi().delete(`/rfid/profile/${code}`)); await loadProfiles() }
-  catch (e) { alert(extractApiError(e)) }
+  if (!confirm(`Eliminare il profilo "${code}"?`)) return
+  clearFeedback()
+  try {
+    await guardedCall(() => getApi().delete(`/rfid/profile/${code}`))
+    showSuccess(`Profilo "${code}" eliminato.`)
+    await loadProfiles()
+  } catch (e) {
+    showError(extractApiError(e, 'Errore eliminazione profilo'))
+  }
 }
 
 async function triggerProfile(code) {
-  try { await guardedCall(() => getApi().post('/rfid/trigger', { rfid_code: code })); await loadCurrentRfid() }
-  catch (e) { alert(extractApiError(e)) }
+  try {
+    await guardedCall(() => getApi().post('/rfid/trigger', { rfid_code: code }))
+    await loadCurrentRfid()
+  } catch (e) {
+    showError(extractApiError(e, 'Errore trigger profilo'))
+  }
 }
 
 async function previewRss() {
@@ -295,7 +316,7 @@ function resetForm() {
   Object.assign(form, FORM_DEFAULT())
 }
 
-function waitForScan() { isScanning.value = true; form.rfid_code = ''; alert('Appoggia una statuina sul lettore.') }
+function waitForScan() { isScanning.value = true; form.rfid_code = '' }
 
 function handleRfidScanned(data) { if (isScanning.value && data?.uid) { form.rfid_code = data.uid; isScanning.value = false } }
 
@@ -327,6 +348,26 @@ onBeforeUnmount(() => { const s = getSocket(); if (s) { s.off('rfid_scanned', ha
 .admin-rfid { display: flex; flex-direction: column; gap: 25px; }
 .rfid-header h2 { margin: 0; color: #fff; }
 .rfid-header p { color: #aaa; margin: 5px 0 0; }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
+
+.scan-hint { margin: 4px 0 0; font-size: 0.85rem; color: #ff9800; font-style: italic; }
+
 .rfid-form-card, .rfid-list-card, .current-card { background: #2a2a35; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,.2); }
 .rfid-form-card h3, .rfid-list-card h3, .current-card h3 { margin-top: 0; border-bottom: 1px solid #3a3a48; padding-bottom: 10px; color: #ffd27b; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }

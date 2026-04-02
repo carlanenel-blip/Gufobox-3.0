@@ -43,6 +43,12 @@
       <button class="btn-refresh" @click="loadStatus">🔄 Aggiorna</button>
     </div>
 
+    <!-- Feedback banner -->
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
     <!-- Master LED config -->
     <div class="card">
       <div class="card-header">
@@ -137,8 +143,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, guardedCall, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 const loadingMaster = ref(false)
 const saving = ref(false)
@@ -215,6 +223,7 @@ async function loadStatus() {
 
 async function saveMaster() {
   saving.value = true
+  clearFeedback()
   try {
     const api = getApi()
     // Post new nested format
@@ -223,9 +232,9 @@ async function saveMaster() {
       settings: { ...masterSettings },
     }))
     await loadStatus()
-    alert('Configurazione LED salvata!')
+    showSuccess('Configurazione LED salvata.')
   } catch (e) {
-    alert(extractApiError(e, 'Errore salvataggio'))
+    showError(extractApiError(e, 'Errore salvataggio'))
   } finally {
     saving.value = false
   }
@@ -233,6 +242,7 @@ async function saveMaster() {
 
 async function testEffect() {
   testing.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/led/effects/test', {
@@ -242,7 +252,7 @@ async function testEffect() {
       speed: masterSettings.speed,
     }))
   } catch (e) {
-    alert(extractApiError(e, 'Errore test effetto'))
+    showError(extractApiError(e, 'Errore test effetto'))
   } finally {
     testing.value = false
   }
@@ -253,27 +263,30 @@ async function uploadEffect(event) {
   if (!file) return
   const formData = new FormData()
   formData.append('file', file)
+  clearFeedback()
   try {
     const api = getApi()
     await api.post('/led/effects/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
     await loadEffects()
-    alert('Effetto caricato con successo!')
+    showSuccess('Effetto caricato con successo.')
   } catch (e) {
-    alert(extractApiError(e, 'Errore caricamento effetto'))
+    showError(extractApiError(e, 'Errore caricamento effetto'))
   }
   event.target.value = ''
 }
 
 async function deleteEffect(effectId) {
   if (!confirm(`Eliminare l'effetto "${effectId}"?`)) return
+  clearFeedback()
   try {
     const api = getApi()
     await api.delete(`/led/effects/${effectId}`)
     await loadEffects()
+    showSuccess(`Effetto "${effectId}" eliminato.`)
   } catch (e) {
-    alert(extractApiError(e, 'Errore eliminazione effetto'))
+    showError(extractApiError(e, 'Errore eliminazione effetto'))
   }
 }
 
@@ -293,6 +306,23 @@ onMounted(() => {
 
 .header-section h2 { margin: 0; color: #fff; }
 .header-section p { color: #aaa; margin: 5px 0 0 0; }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
 
 .card {
   background: #2a2a35;

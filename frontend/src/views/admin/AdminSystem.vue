@@ -11,13 +11,19 @@
       🌙 <strong>GufoBox in standby applicativo</strong> — clicca "Riavvia" o "Standby" per interagire.
     </div>
 
+    <!-- Feedback banner -->
+    <div v-if="feedbackMsg" class="banner" :class="'banner-' + feedbackType">
+      <span>{{ feedbackMsg }}</span>
+      <button class="banner-close" @click="clearFeedback">✕</button>
+    </div>
+
     <!-- Power controls -->
     <div class="card">
       <h3>Alimentazione 🔌</h3>
       <div class="power-row">
-        <button class="btn-power standby" @click="sendAction('standby')">🌙 Standby</button>
-        <button class="btn-power reboot" @click="sendAction('reboot')">🔄 Riavvia</button>
-        <button class="btn-power shutdown" @click="sendAction('shutdown')">⏻ Spegni</button>
+        <button class="btn-power standby" @click="sendAction('standby')" :disabled="powerBusy">🌙 Standby</button>
+        <button class="btn-power reboot" @click="sendAction('reboot')" :disabled="powerBusy">🔄 Riavvia</button>
+        <button class="btn-power shutdown" @click="sendAction('shutdown')" :disabled="powerBusy">⏻ Spegni</button>
       </div>
     </div>
 
@@ -172,11 +178,14 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useApi } from '../../composables/useApi'
+import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
 const { getApi, guardedCall, extractApiError } = useApi()
+const { feedbackMsg, feedbackType, showSuccess, showError, clearFeedback } = useAdminFeedback()
 
 // Standby state
 const inStandby = ref(false)
+const powerBusy = ref(false)
 
 async function loadStandbyStatus() {
   try {
@@ -192,14 +201,19 @@ async function loadStandbyStatus() {
 async function sendAction(azione) {
   const labels = { standby: 'mettere in standby', reboot: 'riavviare', shutdown: 'spegnere' }
   if (!confirm(`Vuoi davvero ${labels[azione]} la GufoBox?`)) return
+  powerBusy.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/system', { azione }))
     if (azione === 'standby') {
       inStandby.value = true
+      showSuccess('GufoBox in standby.')
     }
   } catch (e) {
-    alert(extractApiError(e, `Errore: ${azione}`))
+    showError(extractApiError(e, `Errore durante l'operazione "${azione}"`))
+  } finally {
+    powerBusy.value = false
   }
 }
 
@@ -247,12 +261,13 @@ async function loadOtaStatus() {
 
 async function startOta(mode) {
   if (!confirm(`Avviare aggiornamento in modalità "${mode}"?`)) return
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/system/ota/start', { mode }))
     setTimeout(loadOtaStatus, 2000)
   } catch (e) {
-    alert(extractApiError(e, 'Errore avvio OTA'))
+    showError(extractApiError(e, 'Errore avvio OTA'))
   }
 }
 
@@ -319,6 +334,7 @@ async function uploadPackage() {
 
 async function applyUploaded() {
   if (!confirm('Applicare il package caricato? Verrà creato un backup automatico prima di procedere.')) return
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/system/ota/apply_uploaded'))
@@ -328,7 +344,7 @@ async function applyUploaded() {
       otaPollInterval = setInterval(loadOtaStatus, 3000)
     }
   } catch (e) {
-    alert(extractApiError(e, 'Errore apply package'))
+    showError(extractApiError(e, 'Errore apply package'))
   }
 }
 
@@ -347,24 +363,27 @@ async function loadBackups() {
 
 async function deleteBackup(name) {
   if (!confirm(`Eliminare il backup "${name}"?`)) return
+  clearFeedback()
   try {
     const api = getApi()
     await api.delete(`/system/backups/${name}`)
     await loadBackups()
+    showSuccess(`Backup "${name}" eliminato.`)
   } catch (e) {
-    alert(extractApiError(e, 'Errore eliminazione backup'))
+    showError(extractApiError(e, 'Errore eliminazione backup'))
   }
 }
 
 async function rollback(backupName) {
   if (!confirm(`Ripristinare l'app dal backup "${backupName}"?\nI file correnti verranno sovrascritti.`)) return
   rollingBack.value = true
+  clearFeedback()
   try {
     const api = getApi()
     await guardedCall(() => api.post('/system/rollback', { backup_name: backupName }))
-    alert('Rollback avviato! Riavvia la GufoBox per applicare le modifiche.')
+    showSuccess('Rollback avviato. Riavvia la GufoBox per applicare le modifiche.')
   } catch (e) {
-    alert(extractApiError(e, 'Errore rollback'))
+    showError(extractApiError(e, 'Errore rollback'))
   } finally {
     rollingBack.value = false
   }
@@ -409,6 +428,23 @@ onUnmounted(() => {
   color: #8ab4f8;
   font-size: 0.95rem;
 }
+
+/* Feedback banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+.banner-error   { background: #3b1212; color: #ef9a9a; border: 1px solid #c62828; }
+.banner-success { background: #1b3a1b; color: #a5d6a7; border: 1px solid #388e3c; }
+.banner-warning { background: #3b2e0a; color: #ffe082; border: 1px solid #f9a825; }
+.banner-info    { background: #1a2a3b; color: #90caf9; border: 1px solid #1565c0; }
+.banner-close { background: none; border: none; cursor: pointer; opacity: 0.7; color: inherit; font-size: 1rem; padding: 0 4px; }
+.banner-close:hover { opacity: 1; }
 
 .card {
   background: #2a2a35;

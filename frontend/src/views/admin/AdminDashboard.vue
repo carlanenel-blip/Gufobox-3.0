@@ -10,7 +10,12 @@
 
     <!-- Offline banner -->
     <div v-if="offline" class="offline-banner">
-      ⚠️ Backend non raggiungibile — modalità offline
+      ⚠️ Backend non raggiungibile — modalità offline. Alcuni dati potrebbero non essere aggiornati.
+    </div>
+
+    <!-- Loading state -->
+    <div v-if="loading && !metrics && !summary" class="loading-banner">
+      ⏳ Caricamento dati in corso...
     </div>
 
     <!-- Standby banner -->
@@ -74,7 +79,7 @@
     </div>
 
     <div v-else-if="!loading" class="empty-state">
-      Metriche hardware non disponibili.
+      Metriche hardware non disponibili — il backend potrebbe essere in avvio o non raggiungibile.
     </div>
 
     <!-- Status overview from diag/summary -->
@@ -241,6 +246,15 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   padding: 12px 18px;
   color: #8ab4f8;
+  font-size: 0.95rem;
+}
+
+.loading-banner {
+  background: #1e1e26;
+  border: 1px solid #3a3a48;
+  border-radius: 10px;
+  padding: 12px 18px;
+  color: #aaa;
   font-size: 0.95rem;
 }
 

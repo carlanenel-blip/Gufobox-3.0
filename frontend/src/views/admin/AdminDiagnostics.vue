@@ -197,7 +197,7 @@
       </div>
 
       <div v-else-if="!loadingEvents" class="empty-state">
-        Nessun evento registrato.
+        Nessun evento registrato. Gli eventi vengono generati automaticamente durante l'uso del sistema.
       </div>
     </div>
 
