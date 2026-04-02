@@ -29,7 +29,10 @@ rfid_bp = Blueprint("rfid", __name__)
 # =========================================================
 # VALIDAZIONE
 # =========================================================
-VALID_MODES = {"media_folder", "webradio", "ai_chat", "rss_feed", "edu_ai"}
+VALID_MODES = {"media_folder", "webradio", "ai_chat", "rss_feed", "edu_ai", "web_media"}
+
+# web_media content sub-types (for UI clarity; does not affect playback logic)
+VALID_WEB_CONTENT_TYPES = {"radio", "podcast", "youtube", "rss", "generic"}
 
 # Educational AI constants (mirrors api/ai.py — kept in sync)
 _VALID_AGE_GROUPS = {"bambino", "ragazzo", "adulto"}
@@ -37,7 +40,7 @@ _VALID_ACTIVITY_MODES = {
     "teaching_general", "quiz", "math", "animal_sounds_games",
     "interactive_story", "foreign_languages", "free_conversation",
 }
-_VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french"}
+_VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french", "japanese", "chinese"}
 _HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{3,8}$')
 
 
@@ -188,6 +191,21 @@ def validate_rfid_profile(data, update=False):
     elif webradio_url and not _is_valid_http_url(webradio_url):
         errors.append("webradio_url deve essere un URL HTTP/HTTPS valido")
 
+    # web_media_url (richiesto se mode == web_media)
+    web_media_url = str(data.get("web_media_url", "")).strip()
+    if not update and mode == "web_media":
+        if not web_media_url:
+            errors.append("web_media_url è obbligatorio per mode=web_media")
+        elif not _is_valid_http_url(web_media_url):
+            errors.append("web_media_url deve essere un URL HTTP/HTTPS valido")
+    elif web_media_url and not _is_valid_http_url(web_media_url):
+        errors.append("web_media_url deve essere un URL HTTP/HTTPS valido")
+
+    # web_content_type (opzionale, usato per chiarezza UI)
+    web_content_type = str(data.get("web_content_type", "generic")).strip().lower()
+    if web_content_type not in VALID_WEB_CONTENT_TYPES:
+        web_content_type = "generic"
+
     # ai_prompt (opzionale)
     ai_prompt = str(data.get("ai_prompt", "")).strip()
 
@@ -242,6 +260,8 @@ def validate_rfid_profile(data, update=False):
         "image_path": image_path,
         "folder": folder,
         "webradio_url": webradio_url,
+        "web_media_url": web_media_url,
+        "web_content_type": web_content_type,
         "ai_prompt": ai_prompt,
         "rss_url": rss_url,
         "rss_limit": rss_limit,
@@ -347,6 +367,8 @@ def api_rfid_current():
         "player_running": media_runtime.get("player_running", False),
         "volume": media_runtime.get("current_volume", 70),
         "rss_state": rss_runtime.get(current_code) if current_code else None,
+        "web_content_type": media_runtime.get("web_content_type"),
+        "web_media_url": media_runtime.get("web_media_url"),
     })
 
 
@@ -390,6 +412,8 @@ def api_rfid_trigger_profile():
         return _trigger_media_folder(rfid_code, profile)
     elif mode == "webradio":
         return _trigger_webradio(rfid_code, profile)
+    elif mode == "web_media":
+        return _trigger_web_media(rfid_code, profile)
     elif mode == "ai_chat":
         return _trigger_ai_chat(rfid_code, profile)
     elif mode == "rss_feed":
@@ -473,6 +497,98 @@ def _trigger_webradio(rfid_code, profile):
 
     bus.emit_notification(f"📻 {profile.get('name', rfid_code)}", "success")
     return jsonify({"status": "ok", "mode": "webradio", "url": url})
+
+
+def _trigger_web_media(rfid_code, profile):
+    """
+    mode=web_media: contenuto web unificato (radio, podcast, YouTube, URL generici, RSS).
+
+    Se web_content_type == 'rss', il comportamento è identico a mode=rss_feed
+    (fetch del feed e salvataggio nello stato runtime).
+    Per tutti gli altri tipi, l'URL viene passato direttamente a MPV/yt-dlp.
+    """
+    url = profile.get("web_media_url", "")
+    if not url:
+        return jsonify({"error": "web_media_url non specificato"}), 400
+
+    content_type = profile.get("web_content_type", "generic")
+
+    if content_type == "rss":
+        # Reuse RSS logic: fetch feed and store in rss_runtime
+        rss_limit = profile.get("rss_limit", 10)
+        items, err = _fetch_rss(url, rss_limit)
+        if err:
+            log(f"Errore RSS per RFID {rfid_code}: {err}", "warning")
+            bus.emit_notification("Errore durante il fetch RSS", "warning")
+            return jsonify({"error": "Errore durante il fetch del feed RSS"}), 500
+
+        rss_state = {
+            "rfid_code": rfid_code,
+            "profile_name": profile.get("name"),
+            "rss_url": url,
+            "fetched_at": int(time.time()),
+            "items": items,
+        }
+        rss_runtime[rfid_code] = rss_state
+        bus.mark_dirty("rss")
+        bus.request_emit("public")
+
+        media_runtime["current_rfid"] = rfid_code
+        media_runtime["current_profile_name"] = profile.get("name")
+        media_runtime["current_mode"] = "web_media"
+        media_runtime["web_content_type"] = content_type
+        media_runtime["web_media_url"] = url
+        media_runtime["rss_state"] = rss_state
+        bus.mark_dirty("media")
+        bus.request_emit("public")
+
+        bus.emit_notification(f"📰 {profile.get('name', rfid_code)} — {len(items)} articoli", "success")
+        return jsonify({
+            "status": "ok",
+            "mode": "web_media",
+            "web_content_type": content_type,
+            "url": url,
+            "items": items,
+        })
+
+    # Radio, Podcast, YouTube, generic — pass URL to MPV/yt-dlp
+    from core.media import start_player
+
+    _CONTENT_ICONS = {
+        "radio": "📻",
+        "podcast": "🎙️",
+        "youtube": "▶️",
+        "generic": "🌍",
+    }
+    icon = _CONTENT_ICONS.get(content_type, "🌍")
+
+    success, msg = start_player(
+        url,
+        mode="audio_only",
+        rfid_uid=rfid_code,
+        profile_name=profile.get("name"),
+        profile_mode="web_media",
+        volume=profile.get("volume"),
+    )
+
+    if not success:
+        return jsonify({"error": msg}), 500
+
+    media_runtime["current_rfid"] = rfid_code
+    media_runtime["current_profile_name"] = profile.get("name")
+    media_runtime["current_mode"] = "web_media"
+    media_runtime["web_content_type"] = content_type
+    media_runtime["web_media_url"] = url
+    bus.mark_dirty("media")
+    bus.request_emit("public")
+
+    bus.emit_notification(f"{icon} {profile.get('name', rfid_code)}", "success")
+    return jsonify({
+        "status": "ok",
+        "mode": "web_media",
+        "web_content_type": content_type,
+        "url": url,
+    })
 
 
 def _trigger_ai_chat(rfid_code, profile):

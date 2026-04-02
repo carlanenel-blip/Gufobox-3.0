@@ -29,7 +29,7 @@ VALID_ACTIVITY_MODES = {
     "foreign_languages",
     "free_conversation",
 }
-VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french"}
+VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french", "japanese", "chinese"}
 
 # Maps legacy interactive_mode values -> canonical activity_mode
 LEGACY_MODE_MAP = {
@@ -47,6 +47,8 @@ LEGACY_LANG_MAP = {
     "es": "spanish",
     "de": "german",
     "fr": "french",
+    "ja": "japanese",
+    "zh": "chinese",
 }
 
 # Reverse: canonical language_target -> legacy code
@@ -54,10 +56,12 @@ LANG_TO_CODE = {v: k for k, v in LEGACY_LANG_MAP.items()}
 
 # Italian display names for languages
 LANGUAGE_NAMES_IT = {
-    "english": "inglese",
-    "spanish": "spagnolo",
-    "german":  "tedesco",
-    "french":  "francese",
+    "english":  "inglese",
+    "spanish":  "spagnolo",
+    "german":   "tedesco",
+    "french":   "francese",
+    "japanese": "giapponese",
+    "chinese":  "cinese",
 }
 
 # Activity mode display names (Italian)
