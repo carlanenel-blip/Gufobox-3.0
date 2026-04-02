@@ -3,7 +3,7 @@
 
     <div class="rfid-header">
       <h2>Statuine Magiche (RFID) 🏷️</h2>
-      <p>Gestisci i profili avanzati delle statuine: cartella media, webradio, AI, feed RSS.</p>
+      <p>Gestisci i profili avanzati delle statuine: cartella media, contenuti web (radio, podcast, YouTube, feed RSS), AI educativa.</p>
     </div>
 
     <!-- Feedback banner -->
@@ -35,7 +35,8 @@
           <label>Modalità</label>
           <select v-model="form.mode">
             <option value="media_folder">🎵 Cartella Media</option>
-            <option value="webradio">📻 Webradio</option>
+            <option value="webradio">📻 Webradio (legacy)</option>
+            <option value="web_media">🌐 Contenuto Web (radio · podcast · YouTube · RSS)</option>
             <option value="ai_chat">🦉 Chat AI (Gufetto)</option>
             <option value="rss_feed">📰 Feed RSS</option>
             <option value="edu_ai">🎓 AI Educativa</option>
@@ -80,6 +81,36 @@
         </div>
       </div>
 
+      <!-- WEB MEDIA section: radio, podcast, YouTube, RSS, generic -->
+      <div v-if="form.mode === 'web_media'" class="mode-section web-media-section">
+        <h4>🌐 Contenuto Web</h4>
+        <p class="mode-hint">Inserisci il link di una radio, podcast, video YouTube o feed RSS. MPV/yt-dlp gestiranno automaticamente la riproduzione.</p>
+        <div class="form-grid-2">
+          <div class="form-group form-group-full">
+            <label>URL / Link Web</label>
+            <input type="url" v-model="form.web_media_url" placeholder="https://... (radio, podcast, YouTube, RSS)" />
+          </div>
+          <div class="form-group">
+            <label>Tipo contenuto</label>
+            <select v-model="form.web_content_type">
+              <option value="radio">📻 Radio streaming</option>
+              <option value="podcast">🎙️ Podcast</option>
+              <option value="youtube">▶️ YouTube</option>
+              <option value="rss">📰 Feed RSS</option>
+              <option value="generic">🌍 Web media generico</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Volume {{ form.volume }}%</label>
+            <input type="range" min="0" max="100" v-model.number="form.volume" />
+          </div>
+          <div v-if="form.web_content_type === 'rss'" class="form-group">
+            <label>Limite articoli: {{ form.rss_limit }}</label>
+            <input type="range" min="1" max="50" v-model.number="form.rss_limit" />
+          </div>
+        </div>
+      </div>
+
       <div v-if="form.mode === 'ai_chat'" class="mode-section">
         <h4>🦉 Chat AI (Gufetto)</h4>
         <div class="form-group form-group-full">
@@ -120,6 +151,8 @@
               <option value="spanish">🇪🇸 Spagnolo</option>
               <option value="german">🇩🇪 Tedesco</option>
               <option value="french">🇫🇷 Francese</option>
+              <option value="japanese">🇯🇵 Giapponese</option>
+              <option value="chinese">🇨🇳 Cinese</option>
             </select>
           </div>
           <div class="form-group">
@@ -212,6 +245,8 @@
         <div><span class="label">RFID:</span> {{ currentRfid.current_rfid }}</div>
         <div><span class="label">Profilo:</span> {{ currentRfid.current_profile_name }}</div>
         <div><span class="label">Modalit\u00e0:</span> {{ currentRfid.current_mode }}</div>
+        <div v-if="currentRfid.web_content_type"><span class="label">Tipo Web:</span> {{ webContentTypeLabel(currentRfid.web_content_type) }}</div>
+        <div v-if="currentRfid.web_media_url"><span class="label">URL:</span> {{ currentRfid.web_media_url }}</div>
         <div v-if="currentRfid.current_media_path"><span class="label">File:</span> {{ currentRfid.current_media_path }}</div>
         <div v-if="currentRfid.current_playlist?.length">
           <span class="label">Playlist:</span> {{ currentRfid.playlist_index + 1 }} / {{ currentRfid.current_playlist.length }}
@@ -283,8 +318,8 @@ const EDU_CONFIG_DEFAULT = () => ({
 
 const FORM_DEFAULT = () => ({
   rfid_code: '', name: '', enabled: true, mode: 'media_folder',
-  image_path: '', folder: '', webradio_url: '', ai_prompt: '',
-  rss_url: '', rss_limit: 10, volume: 70, loop: true,
+  image_path: '', folder: '', webradio_url: '', web_media_url: '', web_content_type: 'generic',
+  ai_prompt: '', rss_url: '', rss_limit: 10, volume: 70, loop: true,
   edu_config: EDU_CONFIG_DEFAULT(),
   led: { enabled: false, effect_id: 'solid', color: '#ffffff', brightness: 70, speed: 30 },
 })
@@ -300,7 +335,7 @@ const MODE_LABELS_EDU = {
   math: 'Matematica',
   foreign_languages: 'Lingue Straniere',
 }
-const LANG_LABELS = { english: 'Inglese', spanish: 'Spagnolo', german: 'Tedesco', french: 'Francese' }
+const LANG_LABELS = { english: 'Inglese', spanish: 'Spagnolo', german: 'Tedesco', french: 'Francese', japanese: 'Giapponese', chinese: 'Cinese' }
 
 const eduSummary = computed(() => {
   const ec = form.edu_config
@@ -403,11 +438,13 @@ function waitForScan() { isScanning.value = true; form.rfid_code = '' }
 
 function handleRfidScanned(data) { if (isScanning.value && data?.uid) { form.rfid_code = data.uid; isScanning.value = false } }
 
-function modeIcon(m) { return { media_folder: '🎵', webradio: '📻', ai_chat: '🦉', rss_feed: '📰', edu_ai: '🎓' }[m] || '🏷️' }
-function modeLabel(m) { return { media_folder: 'Cartella Media', webradio: 'Webradio', ai_chat: 'AI Chat', rss_feed: 'Feed RSS', edu_ai: 'AI Educativa' }[m] || m }
+function modeIcon(m) { return { media_folder: '🎵', webradio: '📻', web_media: '🌐', ai_chat: '🦉', rss_feed: '📰', edu_ai: '🎓' }[m] || '🏷️' }
+function modeLabel(m) { return { media_folder: 'Cartella Media', webradio: 'Webradio', web_media: 'Contenuto Web', ai_chat: 'AI Chat', rss_feed: 'Feed RSS', edu_ai: 'AI Educativa' }[m] || m }
+function webContentTypeLabel(t) { return { radio: '📻 Radio streaming', podcast: '🎙️ Podcast', youtube: '▶️ YouTube', rss: '📰 Feed RSS', generic: '🌍 Web media generico' }[t] || t }
 function profileTarget(p) {
   if (p.mode === 'media_folder') return p.folder || ''
   if (p.mode === 'webradio') return p.webradio_url || ''
+  if (p.mode === 'web_media') return p.web_media_url || ''
   if (p.mode === 'ai_chat') return (p.ai_prompt || 'Prompt AI').slice(0, 60)
   if (p.mode === 'rss_feed') return p.rss_url || ''
   if (p.mode === 'edu_ai' && p.edu_config) {
@@ -426,7 +463,7 @@ onMounted(() => {
     s.on('rfid_scanned', handleRfidScanned)
     s.on('public_snapshot', snap => {
       const mr = snap?.media_runtime
-      currentRfid.value = mr?.current_rfid ? { current_rfid: mr.current_rfid, current_profile_name: mr.current_profile_name, current_mode: mr.current_mode, current_media_path: mr.current_media_path, current_playlist: mr.current_playlist, playlist_index: mr.playlist_index, rss_state: mr.rss_state } : null
+      currentRfid.value = mr?.current_rfid ? { current_rfid: mr.current_rfid, current_profile_name: mr.current_profile_name, current_mode: mr.current_mode, current_media_path: mr.current_media_path, current_playlist: mr.current_playlist, playlist_index: mr.playlist_index, rss_state: mr.rss_state, web_content_type: mr.web_content_type, web_media_url: mr.web_media_url } : null
     })
   }
 })

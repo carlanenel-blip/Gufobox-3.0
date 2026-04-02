@@ -119,7 +119,8 @@ class TestEduConstants:
 
     def test_valid_language_targets_has_four(self):
         from api.ai import VALID_LANGUAGE_TARGETS
-        assert {"english", "spanish", "german", "french"} == VALID_LANGUAGE_TARGETS
+        # Core legacy languages must be present; Japanese and Chinese support was added later
+        assert {"english", "spanish", "german", "french"}.issubset(VALID_LANGUAGE_TARGETS)
 
     def test_legacy_mode_map_covers_old_names(self):
         from api.ai import LEGACY_MODE_MAP
