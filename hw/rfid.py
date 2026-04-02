@@ -1,14 +1,44 @@
 import time
-import requests
 import eventlet
-from core.utils import log
+from core.utils import log, is_shutdown_requested
 
 try:
     from mfrc522 import SimpleMFRC522
 except ImportError:
     SimpleMFRC522 = None
 
+# Import diretto per evitare roundtrip HTTP locale (fallback al modulo api/rfid se disponibile)
+try:
+    from api.rfid import handle_rfid_trigger as _handle_rfid_trigger
+    _DIRECT_TRIGGER_AVAILABLE = True
+except Exception:
+    _handle_rfid_trigger = None
+    _DIRECT_TRIGGER_AVAILABLE = False
+
 API_BASE = "http://127.0.0.1:5000/api"
+
+
+def _trigger_rfid_direct(uid_str):
+    """Chiama direttamente la logica Python invece di un roundtrip HTTP locale."""
+    if _DIRECT_TRIGGER_AVAILABLE and _handle_rfid_trigger is not None:
+        return _handle_rfid_trigger(uid_str)
+    return False
+
+
+def _trigger_rfid_http(uid_str):
+    """Fallback: chiama l'API via HTTP (richiede che Flask sia già avviato)."""
+    try:
+        import requests
+        res = requests.post(
+            f"{API_BASE}/rfid/trigger",
+            json={"rfid_code": uid_str},
+            timeout=3
+        )
+        return res.status_code == 200
+    except Exception as e:
+        log(f"Errore di comunicazione API dall'RFID (HTTP fallback): {e}", "warning")
+        return False
+
 
 def _rfid_worker():
     if not SimpleMFRC522:
@@ -22,7 +52,7 @@ def _rfid_worker():
 
     log("Lettore RFID (RC522) in ascolto via SPI...", "info")
 
-    while True:
+    while not is_shutdown_requested():
         try:
             # reader.read() è bloccante, ma legge velocemente. 
             # Potremmo usare read_no_block() se serve più reattività.
@@ -35,25 +65,25 @@ def _rfid_worker():
             if uid_str != last_uid or (now - last_read_time) > 3:
                 log(f"Statuina FISICA rilevata! UID: {uid_str}", "info")
                 
+                # Prima prova la chiamata Python diretta, poi fallback HTTP
+                success = False
                 try:
-                    # Inviamo il codice letto alle nostre API
-                    res = requests.post(
-                        f"{API_BASE}/rfid/trigger", 
-                        json={"rfid_code": uid_str}, 
-                        timeout=3
-                    )
-                    
-                    if res.status_code == 200:
-                        last_uid = uid_str
-                        last_read_time = now
+                    success = _trigger_rfid_direct(uid_str)
                 except Exception as e:
-                    log(f"Errore di comunicazione API dall'RFID: {e}", "warning")
+                    log(f"Chiamata diretta RFID fallita, provo HTTP: {e}", "warning")
+                    success = _trigger_rfid_http(uid_str)
+
+                if success:
+                    last_uid = uid_str
+                    last_read_time = now
 
         except Exception as e:
             log(f"Errore lettura RC522: {e}", "warning")
         
         # Pausa per non impallare la CPU (il thread eventlet)
         eventlet.sleep(0.5)
+
+    log("Worker RFID terminato (shutdown richiesto).", "info")
 
 def init_rfid():
     # Facciamo partire il thread in background
