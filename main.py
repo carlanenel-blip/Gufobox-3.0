@@ -43,6 +43,7 @@ from api.diag import diag_bp
 from api.rfid import rfid_bp
 from api.rss import rss_bp
 from api.audio import audio_bp
+from api.wizard import wizard_bp
 
 def create_app():
     """Configura e assembla l'applicazione Flask principale"""
@@ -73,6 +74,7 @@ def create_app():
     app.register_blueprint(rfid_bp, url_prefix='/api')
     app.register_blueprint(rss_bp, url_prefix='/api')
     app.register_blueprint(audio_bp, url_prefix='/api')
+    app.register_blueprint(wizard_bp, url_prefix='/api')
 
     # Colleghiamo Socket.io all'app Flask per le comunicazioni in tempo reale
     socketio.init_app(app, cors_allowed_origins="*", async_mode="eventlet", ping_interval=25, ping_timeout=20)
