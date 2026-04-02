@@ -71,6 +71,7 @@
               <option value="quiz">❓ Quiz</option>
               <option value="math">🧮 Matematica</option>
               <option value="foreign_languages">🌍 Lingue Straniere</option>
+              <option value="school_conversation">🏫 Conversazione Scolastica</option>
             </select>
           </div>
 
@@ -87,6 +88,8 @@
               <option value="spanish">🇪🇸 Spagnolo</option>
               <option value="german">🇩🇪 Tedesco</option>
               <option value="french">🇫🇷 Francese</option>
+              <option value="japanese">🇯🇵 Giapponese</option>
+              <option value="chinese">🇨🇳 Cinese</option>
             </select>
           </div>
 
@@ -178,6 +181,31 @@
 
     </div>
   </div>
+
+  <!-- Wizard Categories Section -->
+  <div class="wizard-categories-section card" style="margin-top:1.5rem;">
+    <h3>🧙 Categorie Wizard (Statuine School &amp; Entertainment)</h3>
+    <p class="help-text">Configura le attività disponibili per le statuine <strong>Scuola</strong> e <strong>Intrattenimento</strong>.</p>
+
+    <div v-if="wizardCatLoading" class="loading">Caricamento... ⏳</div>
+    <div v-else class="wizard-cat-grid">
+      <div v-for="(cat, catId) in wizardCategories" :key="catId" class="wizard-cat-card">
+        <h4>{{ catId === 'school' ? '🏫' : '🎮' }} {{ cat.label }}</h4>
+        <ul class="activity-list">
+          <li v-for="act in cat.activities" :key="act.id" class="activity-item">
+            <label class="activity-toggle">
+              <input type="checkbox" v-model="act.enabled" @change="saveWizardCategories" />
+              <span>{{ act.label }}</span>
+              <code class="act-id">{{ act.id }}</code>
+            </label>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <p v-if="wizardCatError" class="banner banner-error" style="margin-top:.5rem;">⚠️ {{ wizardCatError }}</p>
+    <p v-if="wizardCatSuccess" class="banner banner-success" style="margin-top:.5rem;">✅ {{ wizardCatSuccess }}</p>
+  </div>
+</div>
 </template>
 
 <script setup>
@@ -189,6 +217,12 @@ const { getApi, guardedCall } = useApi()
 const loading = ref(true)
 const isResetting = ref(false)
 const chatBox = ref(null)
+
+// Wizard categories state
+const wizardCategories = ref({})
+const wizardCatLoading = ref(true)
+const wizardCatError = ref(null)
+const wizardCatSuccess = ref(null)
 
 const currentStatus = ref('idle')
 const lastError = ref(null)
@@ -448,10 +482,38 @@ function scrollToBottom() {
   })
 }
 
+async function loadWizardCategories() {
+  wizardCatLoading.value = true
+  wizardCatError.value = null
+  try {
+    const api = await getApi()
+    const res = await api.get('/ai/wizard/categories')
+    wizardCategories.value = res.data
+  } catch (e) {
+    wizardCatError.value = 'Errore caricamento categorie wizard'
+  } finally {
+    wizardCatLoading.value = false
+  }
+}
+
+async function saveWizardCategories() {
+  wizardCatError.value = null
+  wizardCatSuccess.value = null
+  try {
+    const api = await getApi()
+    await api.post('/ai/wizard/categories', wizardCategories.value)
+    wizardCatSuccess.value = 'Categorie wizard salvate'
+    setTimeout(() => { wizardCatSuccess.value = null }, 3000)
+  } catch (e) {
+    wizardCatError.value = 'Errore salvataggio categorie wizard'
+  }
+}
+
 onMounted(() => {
   loadSettings()
   loadStatus()
   initSpeech()
+  loadWizardCategories()
 })
 </script>
 
@@ -610,6 +672,18 @@ onMounted(() => {
 /* Animations */
 @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* Wizard categories */
+.wizard-categories-section { background: #2a2a35; border-radius: 12px; padding: 20px; }
+.wizard-categories-section h3 { margin-top: 0; color: #ffd27b; border-bottom: 1px solid #3a3a48; padding-bottom: 10px; }
+.wizard-cat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 12px; }
+.wizard-cat-card { background: #1e1e26; border-radius: 10px; padding: 14px; border: 1px solid #3a3a48; }
+.wizard-cat-card h4 { margin: 0 0 10px 0; color: #a9c4e4; font-size: 1rem; }
+.activity-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.activity-item { display: flex; }
+.activity-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ccc; font-size: 0.9rem; }
+.activity-toggle input[type="checkbox"] { accent-color: #4caf50; width: 16px; height: 16px; }
+.act-id { font-size: 0.72rem; color: #666; background: #111; border-radius: 4px; padding: 1px 5px; }
 
 /* Mobile */
 @media (max-width: 900px) {

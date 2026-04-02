@@ -40,6 +40,8 @@
             <option value="ai_chat">🦉 Chat AI (Gufetto)</option>
             <option value="rss_feed">📰 Feed RSS</option>
             <option value="edu_ai">🎓 AI Educativa</option>
+            <option value="school">🏫 Scuola (avvia wizard guidato)</option>
+            <option value="entertainment">🎮 Intrattenimento (avvia wizard guidato)</option>
           </select>
         </div>
         <div class="form-group form-group-inline">
@@ -191,6 +193,21 @@
           </div>
         </div>
         <p v-if="rssPreviewError" class="form-error">{{ rssPreviewError }}</p>
+      </div>
+
+      <!-- Wizard modes: school / entertainment -->
+      <div v-if="form.mode === 'school' || form.mode === 'entertainment'" class="mode-section wizard-mode-section">
+        <h4>{{ form.mode === 'school' ? '🏫 Modalità Scuola' : '🎮 Modalità Intrattenimento' }}</h4>
+        <div class="wizard-mode-info">
+          <p>
+            Questa statuina <strong>avvia un wizard guidato</strong> che chiede all'utente:<br/>
+            fascia d'età → attività → (lingua) → (livello)
+          </p>
+          <p>
+            Non è necessario configurare opzioni aggiuntive qui. Le attività disponibili
+            si configurano nella sezione <em>AI → Categorie Wizard</em>.
+          </p>
+        </div>
       </div>
 
       <!-- Immagine statuina -->
@@ -438,8 +455,8 @@ function waitForScan() { isScanning.value = true; form.rfid_code = '' }
 
 function handleRfidScanned(data) { if (isScanning.value && data?.uid) { form.rfid_code = data.uid; isScanning.value = false } }
 
-function modeIcon(m) { return { media_folder: '🎵', webradio: '📻', web_media: '🌐', ai_chat: '🦉', rss_feed: '📰', edu_ai: '🎓' }[m] || '🏷️' }
-function modeLabel(m) { return { media_folder: 'Cartella Media', webradio: 'Webradio', web_media: 'Contenuto Web', ai_chat: 'AI Chat', rss_feed: 'Feed RSS', edu_ai: 'AI Educativa' }[m] || m }
+function modeIcon(m) { return { media_folder: '🎵', webradio: '📻', web_media: '🌐', ai_chat: '🦉', rss_feed: '📰', edu_ai: '🎓', school: '🏫', entertainment: '🎮' }[m] || '🏷️' }
+function modeLabel(m) { return { media_folder: 'Cartella Media', webradio: 'Webradio', web_media: 'Contenuto Web', ai_chat: 'AI Chat', rss_feed: 'Feed RSS', edu_ai: 'AI Educativa', school: 'Scuola (wizard)', entertainment: 'Intrattenimento (wizard)' }[m] || m }
 function webContentTypeLabel(t) { return { radio: '📻 Radio streaming', podcast: '🎙️ Podcast', youtube: '▶️ YouTube', rss: '📰 Feed RSS', generic: '🌍 Web media generico' }[t] || t }
 function profileTarget(p) {
   if (p.mode === 'media_folder') return p.folder || ''
@@ -453,6 +470,8 @@ function profileTarget(p) {
     if (ec.activity_mode === 'foreign_languages') parts.push(LANG_LABELS[ec.language_target] || ec.language_target)
     return parts.join(' · ')
   }
+  if (p.mode === 'school') return 'Avvia wizard Scuola'
+  if (p.mode === 'entertainment') return 'Avvia wizard Intrattenimento'
   return ''
 }
 
@@ -564,9 +583,13 @@ onBeforeUnmount(() => { const s = getSocket(); if (s) { s.off('rfid_scanned', ha
 .btn-trigger { color: #4caf50; }
 .text-red { color: #ff4d4d; }
 .mode-badge.edu_ai { background: #2e7d32; }
+.mode-badge.school { background: #1565c0; }
+.mode-badge.entertainment { background: #6a1b9a; }
 .edu-ai-section .mode-hint { font-size: .85rem; color: #aaa; margin: -4px 0 12px; font-style: italic; }
 .edu-summary { margin-top: 12px; }
 .edu-tag { display: inline-block; background: #2e7d32; color: #fff; font-size: .82rem; padding: 4px 12px; border-radius: 20px; font-weight: bold; }
 .empty-state { text-align: center; padding: 30px; color: #aaa; font-style: italic; }
 .loading-state { text-align: center; padding: 20px; color: #aaa; }
+.wizard-mode-section { border: 1px solid #3a5a8a; background: #1a2a3a; }
+.wizard-mode-info p { color: #9ec8e4; font-size: 0.9rem; margin: 6px 0; }
 </style>

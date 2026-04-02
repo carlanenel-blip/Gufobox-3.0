@@ -29,7 +29,7 @@ rfid_bp = Blueprint("rfid", __name__)
 # =========================================================
 # VALIDAZIONE
 # =========================================================
-VALID_MODES = {"media_folder", "webradio", "ai_chat", "rss_feed", "edu_ai", "web_media"}
+VALID_MODES = {"media_folder", "webradio", "ai_chat", "rss_feed", "edu_ai", "web_media", "school", "entertainment"}
 
 # web_media content sub-types (for UI clarity; does not affect playback logic)
 VALID_WEB_CONTENT_TYPES = {"radio", "podcast", "youtube", "rss", "generic"}
@@ -39,6 +39,7 @@ _VALID_AGE_GROUPS = {"bambino", "ragazzo", "adulto"}
 _VALID_ACTIVITY_MODES = {
     "teaching_general", "quiz", "math", "animal_sounds_games",
     "interactive_story", "foreign_languages", "free_conversation",
+    "school_conversation",
 }
 _VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french", "japanese", "chinese"}
 _HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{3,8}$')
@@ -420,6 +421,8 @@ def api_rfid_trigger_profile():
         return _trigger_rss_feed(rfid_code, profile)
     elif mode == "edu_ai":
         return _trigger_edu_ai(rfid_code, profile)
+    elif mode in ("school", "entertainment"):
+        return _trigger_wizard(rfid_code, profile)
     else:
         return jsonify({"error": f"mode non supportato: {mode}"}), 400
 
@@ -739,9 +742,52 @@ def _trigger_edu_ai(rfid_code, profile):
     })
 
 
-# =========================================================
-# HELPERS
-# =========================================================
+def _trigger_wizard(rfid_code, profile):
+    """
+    mode=school | entertainment: avvia il wizard guidato AI.
+
+    Non applica subito una configurazione educativa: avvia invece la macchina
+    a stati del wizard che raccoglierà progressivamente le scelte dell'utente.
+    """
+    from core.wizard import wizard_start
+
+    mode = profile.get("mode")  # "school" or "entertainment"
+
+    # Update media_runtime snapshot so frontend knows wizard is active
+    media_runtime["current_rfid"] = rfid_code
+    media_runtime["current_profile_name"] = profile.get("name")
+    media_runtime["current_mode"] = mode
+    bus.mark_dirty("media")
+    bus.request_emit("public")
+
+    # Start the wizard state machine
+    wizard_result = wizard_start(source_category=mode, source_rfid=rfid_code)
+
+    if wizard_result.get("error"):
+        bus.emit_notification(f"Errore wizard: {wizard_result['error']}", "error")
+        return jsonify({"error": wizard_result["error"]}), 400
+
+    icon = "🏫" if mode == "school" else "🎮"
+    bus.emit_notification(
+        f"{icon} {profile.get('name', rfid_code)} — Seleziona fascia d'età", "info"
+    )
+
+    log_event("rfid", "info", "Wizard avviato via RFID", {
+        "rfid_code": rfid_code,
+        "profile_name": profile.get("name"),
+        "category": mode,
+    })
+
+    return jsonify({
+        "status": "ok",
+        "mode": mode,
+        "profile_name": profile.get("name"),
+        "rfid_code": rfid_code,
+        "wizard": wizard_result,
+    })
+
+
+
 def _fetch_rss(rss_url, limit=10):
     """Fetch e parse feed RSS tramite feedparser. Delega a api.rss per evitare duplicazioni."""
     from api.rss import _fetch_and_summarize

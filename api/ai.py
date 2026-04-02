@@ -28,6 +28,7 @@ VALID_ACTIVITY_MODES = {
     "interactive_story",
     "foreign_languages",
     "free_conversation",
+    "school_conversation",
 }
 VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french", "japanese", "chinese"}
 
@@ -73,6 +74,7 @@ ACTIVITY_MODE_LABELS = {
     "interactive_story":  "Storia Interattiva",
     "foreign_languages":  "Lingue Straniere",
     "free_conversation":  "Conversazione Libera",
+    "school_conversation": "Conversazione Scolastica",
 }
 
 # Carichiamo le impostazioni dell'AI (System prompt, voce, ecc.)
@@ -725,7 +727,26 @@ def ai_system_prompt(age_group, activity_mode="free_conversation",
                     "Argomenti di attualità, cultura, professione. Livello B1-B2."
                 )
 
-    # free_conversation: use only the age-group rules above (no extra instructions)
+    elif activity_mode == "school_conversation":
+        if age_group == "bambino":
+            base += (
+                "\nMODALITÀ CONVERSAZIONE SCOLASTICA: Simula un dialogo scolastico semplice. "
+                "Fai domande tipiche da aula (alzare la mano, rispondere alla maestra). "
+                "Usa un tono allegro e incoraggiante. Frasi brevi."
+            )
+        elif age_group == "ragazzo":
+            base += (
+                "\nMODALITÀ CONVERSAZIONE SCOLASTICA: Simula conversazioni scolastiche reali "
+                "(interrogazioni, discussioni in classe, presentazioni). "
+                "Stimola l'espressione del pensiero e la proprietà di linguaggio."
+            )
+        else:
+            base += (
+                "\nMODALITÀ CONVERSAZIONE SCOLASTICA: Simula contesti scolastici formali. "
+                "Tono educativo e diretto. Puoi simulare domande da esame o dibattiti in classe."
+            )
+
+    # free_conversation and school_conversation: use only the age-group rules above
 
     base += "\n\nEvita contenuti inappropriati. Sii conciso (max 3-4 frasi per risposta)."
     return base
@@ -751,4 +772,106 @@ def api_ai_start_game():
     prompt = ai_system_prompt(age_group, activity_mode, language_target, learning_step)
     # The prompt will be used by the next /ai/chat call via ai_settings
     return jsonify({"status": "ok", "game_started": activity_mode, "prompt_preview": prompt[:120]})
+
+
+# =========================================================
+# WIZARD CATEGORIES CONFIG
+# =========================================================
+
+# Default wizard categories configuration
+_DEFAULT_WIZARD_CATEGORIES = {
+    "school": {
+        "label": "Scuola",
+        "activities": [
+            {"id": "teaching_general",   "label": "Insegnamento Generale", "enabled": True},
+            {"id": "math",               "label": "Matematica",            "enabled": True},
+            {"id": "foreign_languages",  "label": "Lingue Straniere",      "enabled": True},
+            {"id": "school_conversation","label": "Conversazione Scolastica","enabled": True},
+        ],
+    },
+    "entertainment": {
+        "label": "Intrattenimento",
+        "activities": [
+            {"id": "quiz",                "label": "Quiz",               "enabled": True},
+            {"id": "animal_sounds_games", "label": "Animali e Versi",    "enabled": True},
+            {"id": "interactive_story",   "label": "Storia Interattiva", "enabled": True},
+            {"id": "free_conversation",   "label": "Conversazione Libera","enabled": True},
+        ],
+    },
+}
+
+# In-memory store for wizard categories (persisted to ai_settings)
+def _get_wizard_categories():
+    """Return wizard categories from ai_settings, falling back to defaults."""
+    import copy
+    stored = ai_settings.get("wizard_categories")
+    if not isinstance(stored, dict):
+        return copy.deepcopy(_DEFAULT_WIZARD_CATEGORIES)
+    # Ensure both categories exist with required structure
+    result = copy.deepcopy(_DEFAULT_WIZARD_CATEGORIES)
+    for cat_id, cat_data in stored.items():
+        if cat_id in result and isinstance(cat_data, dict):
+            if isinstance(cat_data.get("activities"), list):
+                result[cat_id]["activities"] = cat_data["activities"]
+            if "label" in cat_data:
+                result[cat_id]["label"] = cat_data["label"]
+    return result
+
+
+@ai_bp.route("/ai/wizard/categories", methods=["GET"])
+def api_wizard_categories_get():
+    """Return the configurable wizard categories for school and entertainment."""
+    return jsonify(_get_wizard_categories())
+
+
+@ai_bp.route("/ai/wizard/categories", methods=["POST"])
+def api_wizard_categories_post():
+    """Update wizard categories configuration."""
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Body deve essere un oggetto JSON"}), 400
+
+    allowed_cats = {"school", "entertainment"}
+    updated = _get_wizard_categories()
+    errors = []
+
+    for cat_id, cat_data in data.items():
+        if cat_id not in allowed_cats:
+            errors.append(f"Categoria non valida: '{cat_id}'. Valori: {sorted(allowed_cats)}")
+            continue
+        if not isinstance(cat_data, dict):
+            errors.append(f"Categoria '{cat_id}' deve essere un oggetto")
+            continue
+        if "label" in cat_data:
+            updated[cat_id]["label"] = str(cat_data["label"])[:64]
+        if "activities" in cat_data:
+            if not isinstance(cat_data["activities"], list):
+                errors.append(f"'{cat_id}.activities' deve essere una lista")
+                continue
+            # Validate each activity
+            valid_acts = []
+            for act in cat_data["activities"]:
+                if not isinstance(act, dict):
+                    continue
+                act_id = str(act.get("id", "")).strip()
+                if act_id not in VALID_ACTIVITY_MODES:
+                    errors.append(f"activity_mode non valido: '{act_id}'")
+                    continue
+                valid_acts.append({
+                    "id": act_id,
+                    "label": str(act.get("label", ACTIVITY_MODE_LABELS.get(act_id, act_id)))[:64],
+                    "enabled": bool(act.get("enabled", True)),
+                })
+            if not errors:
+                updated[cat_id]["activities"] = valid_acts
+
+    if errors:
+        return jsonify({"error": "Configurazione non valida", "details": errors}), 400
+
+    ai_settings["wizard_categories"] = updated
+    save_json_direct(AI_SETTINGS_FILE, ai_settings)
+    bus.mark_dirty("ai")
+
+    log("Wizard categories aggiornate", "info")
+    return jsonify({"status": "ok", "wizard_categories": updated})
 

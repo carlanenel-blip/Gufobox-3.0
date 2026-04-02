@@ -154,6 +154,11 @@ def build_public_snapshot():
         "in_standby": in_standby,
         "standby_state": standby_state,
     }
+    try:
+        from core.wizard import get_wizard_state
+        payload["wizard"] = get_wizard_state()
+    except Exception:
+        pass
     bus.cached_public_json = payload
     return payload
 
