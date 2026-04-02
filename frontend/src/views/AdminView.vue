@@ -1,6 +1,6 @@
 <template>
   <div class="admin-layout">
-    
+
     <aside class="admin-sidebar">
       <div class="sidebar-header">
         <span class="logo-icon">🦉</span>
@@ -12,10 +12,15 @@
           <span class="nav-icon">🏠</span>
           <span class="nav-label">Dashboard</span>
         </button>
-        
+
         <button @click="currentTab = 'media'" :class="{ active: currentTab === 'media' }">
           <span class="nav-icon">🎵</span>
           <span class="nav-label">Libreria</span>
+        </button>
+
+        <button @click="currentTab = 'files'" :class="{ active: currentTab === 'files' }">
+          <span class="nav-icon">📁</span>
+          <span class="nav-label">File</span>
         </button>
 
         <button @click="currentTab = 'voice'" :class="{ active: currentTab === 'voice' }">
@@ -48,51 +53,70 @@
           <span class="nav-label">LED</span>
         </button>
 
+        <button @click="currentTab = 'network'" :class="{ active: currentTab === 'network' }">
+          <span class="nav-icon">📶</span>
+          <span class="nav-label">Rete</span>
+        </button>
+
+        <button @click="currentTab = 'bluetooth'" :class="{ active: currentTab === 'bluetooth' }">
+          <span class="nav-icon">🛜</span>
+          <span class="nav-label">Bluetooth</span>
+        </button>
+
         <button @click="currentTab = 'system'" :class="{ active: currentTab === 'system' }">
           <span class="nav-icon">⚙️</span>
           <span class="nav-label">Sistema</span>
         </button>
+
+        <button @click="currentTab = 'diag'" :class="{ active: currentTab === 'diag' }">
+          <span class="nav-icon">🔬</span>
+          <span class="nav-label">Diagnostica</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
-        <button class="btn-logout" @click="logout">🚪 Esci</button>
+        <button class="btn-logout" @click="handleLogout" :disabled="loggingOut">
+          {{ loggingOut ? '⏳ Uscita...' : '🚪 Esci' }}
+        </button>
       </div>
     </aside>
 
     <main class="admin-content">
+      <!-- Offline banner -->
+      <div v-if="offline" class="offline-bar">
+        ⚠️ Connessione al backend persa — alcune funzioni potrebbero non essere disponibili
+      </div>
+
       <transition name="fade" mode="out-in">
-        
         <div :key="currentTab" class="tab-container">
-          
-          <div v-if="currentTab === 'dashboard'" class="placeholder-card">
-            <h2>Benvenuto nella GufoBox! 👋</h2>
-            <p>Seleziona una voce dal menu per iniziare a configurare la magia.</p>
-          </div>
+
+          <AdminDashboard v-if="currentTab === 'dashboard'" />
 
           <AdminMediaManager v-if="currentTab === 'media'" />
-          
+
+          <AdminFileManager v-if="currentTab === 'files'" />
+
           <AdminVoiceRecord v-if="currentTab === 'voice'" />
-          
+
           <AdminParental v-if="currentTab === 'parental'" />
-          
+
           <AdminStats v-if="currentTab === 'stats'" />
-          
+
           <AdminAiSettings v-if="currentTab === 'ai'" />
 
           <AdminRfid v-if="currentTab === 'rfid'" />
 
           <AdminLed v-if="currentTab === 'led'" />
 
-          <div v-if="currentTab === 'system'" class="system-group">
-            <AdminSystem />
-            <hr class="system-divider" />
-            <AdminNetwork />
-            <hr class="system-divider" />
-            <AdminBluetooth />
-          </div>
+          <AdminNetwork v-if="currentTab === 'network'" />
+
+          <AdminBluetooth v-if="currentTab === 'bluetooth'" />
+
+          <AdminSystem v-if="currentTab === 'system'" />
+
+          <AdminDiagnostics v-if="currentTab === 'diag'" />
 
         </div>
-        
       </transition>
     </main>
 
@@ -101,10 +125,12 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useAuth } from '../composables/useAuth'
+import { useApi } from '../composables/useApi'
 
-// Importiamo tutti i componenti figli che abbiamo creato
+import AdminDashboard from './admin/AdminDashboard.vue'
 import AdminMediaManager from './admin/AdminMediaManager.vue'
+import AdminFileManager from './admin/AdminFileManager.vue'
 import AdminVoiceRecord from './admin/AdminVoiceRecord.vue'
 import AdminParental from './admin/AdminParental.vue'
 import AdminStats from './admin/AdminStats.vue'
@@ -114,14 +140,22 @@ import AdminBluetooth from './admin/AdminBluetooth.vue'
 import AdminRfid from './admin/AdminRfid.vue'
 import AdminLed from './admin/AdminLed.vue'
 import AdminSystem from './admin/AdminSystem.vue'
+import AdminDiagnostics from './admin/AdminDiagnostics.vue'
 
-const router = useRouter()
-const currentTab = ref('dashboard') // Imposta la pagina iniziale
+const { logoutAdmin } = useAuth()
+const { offline } = useApi()
 
-function logout() {
-  // Rimuove il token di sessione e torna alla schermata di blocco/PIN
-  localStorage.removeItem('gufobox_token')
-  router.push('/login')
+const currentTab = ref('dashboard')
+const loggingOut = ref(false)
+
+async function handleLogout() {
+  if (loggingOut.value) return
+  loggingOut.value = true
+  try {
+    await logoutAdmin()
+  } finally {
+    loggingOut.value = false
+  }
 }
 </script>
 
@@ -256,20 +290,14 @@ function logout() {
   margin-top: 20px;
 }
 
-.placeholder-card h2 { color: #fff; margin-bottom: 10px; }
-.placeholder-card p { color: #a0a0b0; }
-
-.system-group {
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-}
-
-.system-divider {
-  border: 0;
-  height: 1px;
-  background: #2d2d3a;
-  margin: 10px 0;
+/* Offline notification bar */
+.offline-bar {
+  background: #2a1a1a;
+  border-bottom: 1px solid #ff4d4d;
+  color: #ff8a80;
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  text-align: center;
 }
 
 /* -------------------------------------------
