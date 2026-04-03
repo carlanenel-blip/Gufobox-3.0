@@ -169,10 +169,10 @@ onMounted(async () => {
         if (data?.ai_runtime) {
           updateAiRuntime(data.ai_runtime)
         }
-        // Aggiorna percentuale batteria
+        // Aggiorna percentuale batteria (clamped 0-100)
         const batt = data?.state?.battery
         if (batt && batt.percent != null) {
-          batteryPercent.value = Math.round(batt.percent)
+          batteryPercent.value = Math.max(0, Math.min(100, Math.round(batt.percent)))
         }
       },
       onAdminSnapshot: (_data) => {},

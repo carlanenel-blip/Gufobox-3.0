@@ -401,11 +401,10 @@ def api_ai_chat():
         # Risposta di fallback amichevole quando OpenAI non è configurato/disponibile
         reply = random.choice(_AI_FALLBACK_REPLIES)
         _set_ai_state(AI_STATUS_IDLE)
-        import time as _time
         ai_runtime["history"].append({
             "role": "assistant",
             "content": reply,
-            "ts": int(_time.time()),
+            "ts": int(_time_mod.time()),
         })
         if len(ai_runtime["history"]) > 10:
             ai_runtime["history"] = ai_runtime["history"][-10:]
@@ -413,11 +412,10 @@ def api_ai_chat():
         return jsonify({"status": "ok", "reply": reply, "audio_url": None, "offline": True})
 
     # 1. Aggiungiamo il messaggio dell'utente alla storia con timestamp
-    import time as _time
     ai_runtime["history"].append({
         "role": "user",
         "content": user_text,
-        "ts": int(_time.time()),
+        "ts": int(_time_mod.time()),
     })
     
     # Manteniamo solo gli ultimi 10 messaggi per non consumare troppi token
@@ -450,7 +448,7 @@ def api_ai_chat():
         ai_runtime["history"].append({
             "role": "assistant",
             "content": ai_reply,
-            "ts": int(_time.time()),
+            "ts": int(_time_mod.time()),
         })
         # Trim again to keep the cap at 10 (including the just-added reply)
         if len(ai_runtime["history"]) > 10:

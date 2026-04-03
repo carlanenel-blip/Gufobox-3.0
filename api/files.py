@@ -21,6 +21,7 @@ Endpoints:
 import os
 import shutil
 import mimetypes
+import time as _time
 import zipfile
 import threading
 from flask import Blueprint, request, jsonify, send_file
@@ -602,7 +603,7 @@ _UPLOAD_SESSION_MAX_AGE_SEC = 3600  # 1 ora — sessioni abbandonate
 
 def _cleanup_stale_upload_sessions():
     """Rimuove sessioni di upload abbandonate (più vecchie di _UPLOAD_SESSION_MAX_AGE_SEC)."""
-    now = _time_import()
+    now = _time.time()
     with _upload_lock:
         stale = [
             sid for sid, sess in _upload_sessions.items()
@@ -618,11 +619,6 @@ def _cleanup_stale_upload_sessions():
                 pass
     if stale:
         log(f"Upload sessions cleanup: rimosse {len(stale)} sessioni abbandonate", "info")
-
-
-def _time_import():
-    import time as _t
-    return _t.time()
 
 
 @files_bp.route("/files/upload/init", methods=["POST"])
@@ -646,7 +642,6 @@ def api_files_upload_init():
         return jsonify({"error": "Cartella destinazione non valida"}), 400
 
     import uuid
-    import time as _t
     session_id = str(uuid.uuid4())
     tmp_path = os.path.join(_cfg.CHUNK_UPLOAD_ROOT, session_id + ".tmp")
 
@@ -657,7 +652,7 @@ def api_files_upload_init():
             "total_size": int(total_size),
             "received": 0,
             "tmp_path": tmp_path,
-            "created_ts": _t.time(),
+            "created_ts": _time.time(),
         }
     # Cleanup delle sessioni abbandonate (best-effort, non blocca la risposta)
     try:
@@ -730,7 +725,6 @@ def api_files_upload_finalize():
     try:
         if os.path.exists(dest_path):
             base, ext = os.path.splitext(session["filename"])
-            import time as _time
             dest_path = os.path.join(session["destination"],
                                      f"{base}_{int(_time.time())}{ext}")
 
