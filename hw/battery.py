@@ -114,8 +114,8 @@ def _battery_watchdog():
             try:
                 from core.database import log_battery_reading
                 log_battery_reading(percent, voltage if voltage is not None else 0.0, charging)
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"Errore salvataggio storico batteria: {e}", "warning")
 
             # Notifica quando inizia la ricarica (con cooldown)
             if charging and not was_charging and not charging_notif_played:

@@ -59,7 +59,9 @@ def init_db():
                     hour INTEGER
                 )
             ''')
-            # Migrazione: aggiunge colonna hour se non esiste
+            # Migrazione per database esistenti (prima dell'aggiunta della colonna hour):
+            # fresh installs già avranno la colonna dal CREATE TABLE sopra,
+            # quindi il "duplicate column" viene ignorato (identico pattern di playlist_index)
             try:
                 conn.execute("ALTER TABLE listening_stats ADD COLUMN hour INTEGER")
             except sqlite3.OperationalError as e:

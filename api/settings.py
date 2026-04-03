@@ -97,7 +97,7 @@ def api_daily_stats():
 def api_top_figurines():
     """Classifica le statuine più usate per tempo di ascolto 🏆"""
     n = request.args.get("n", 5, type=int)
-    n = max(1, min(20, n))
+    n = max(1, min(20, n))  # Limite a 20 statuine: sufficiente per l'UI e le performance DB
     return jsonify(get_top_figurines(n))
 
 @settings_bp.route("/stats/hourly", methods=["GET"])

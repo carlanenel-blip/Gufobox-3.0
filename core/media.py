@@ -1,4 +1,5 @@
 import os
+import time
 import subprocess
 import threading
 import socket
@@ -140,8 +141,7 @@ def start_player(target, mode="audio_only", rfid_uid=None, playlist_index=0,
     _current_playlist_index = playlist_index
     # Avvia tracciamento durata sessione per le statistiche
     if rfid_uid:
-        import time as _time
-        _session_start_ts = _time.time()
+        _session_start_ts = time.time()
     else:
         _session_start_ts = None
 
@@ -220,8 +220,7 @@ def stop_player():
 
     if uid_to_log and ts_to_log is not None:
         try:
-            import time as _time
-            duration = int(_time.time() - ts_to_log)
+            duration = int(time.time() - ts_to_log)
             from core.database import log_listening_session
             log_listening_session(uid_to_log, duration)
         except Exception as e:
@@ -267,8 +266,7 @@ def _player_watchdog_loop():
                     _session_start_ts = None
                     if uid_ended and ts_ended is not None:
                         try:
-                            import time as _time
-                            duration = int(_time.time() - ts_ended)
+                            duration = int(time.time() - ts_ended)
                             from core.database import log_listening_session
                             log_listening_session(uid_ended, duration)
                         except Exception as e:
