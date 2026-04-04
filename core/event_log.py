@@ -37,6 +37,8 @@ _log_file: str | None = None  # set by _init_log_file() on first use
 _append_count: int = 0  # counts appends since last trim
 _append_count_for_file: str | None = None  # file path the counter is tracking
 _approx_total: int = 0  # estimated total events in the current file
+_events_cache: list[dict] = []  # in-memory cache populated at init and updated on append
+_cache_initialized: bool = False  # whether the cache has been loaded from disk
 
 
 def _init_log_file() -> str:
@@ -50,6 +52,15 @@ def _init_log_file() -> str:
             import tempfile
             _log_file = os.path.join(tempfile.gettempdir(), "gufobox_events.jsonl")
     return _log_file
+
+
+def _ensure_cache() -> None:
+    """Populate the in-memory cache from disk on first call (called under _lock)."""
+    global _events_cache, _cache_initialized, _approx_total
+    if not _cache_initialized:
+        _events_cache = _read_raw()[-EVENT_LOG_MAX_ENTRIES:]
+        _approx_total = len(_events_cache)
+        _cache_initialized = True
 
 
 def _read_raw() -> list[dict]:
@@ -129,7 +140,7 @@ def log_event(
     if details:
         event["details"] = details
 
-    global _append_count, _append_count_for_file, _approx_total
+    global _append_count, _append_count_for_file, _approx_total, _events_cache, _cache_initialized
     with _lock:
         current_file = _init_log_file()
         # Reset counters if the log file has been swapped (e.g. in tests)
@@ -137,7 +148,13 @@ def log_event(
             _append_count = 0
             _approx_total = 0
             _append_count_for_file = current_file
+            _cache_initialized = False
+        _ensure_cache()
         _append_raw(event)
+        _events_cache.append(event)
+        # Keep cache bounded
+        if len(_events_cache) > EVENT_LOG_MAX_ENTRIES:
+            _events_cache = _events_cache[-EVENT_LOG_MAX_ENTRIES:]
         _append_count += 1
         _approx_total += 1
         # Trim periodically — but only when the file might actually exceed the max.
@@ -157,8 +174,17 @@ def get_events(limit: int = 100) -> list[dict]:
 
     Never raises; returns [] on any error.
     """
+    global _events_cache, _cache_initialized, _append_count_for_file, _append_count, _approx_total
     with _lock:
-        events = _read_raw()
+        current_file = _init_log_file()
+        # Reset cache if the log file has been swapped (e.g. in tests)
+        if _append_count_for_file != current_file:
+            _append_count = 0
+            _approx_total = 0
+            _append_count_for_file = current_file
+            _cache_initialized = False
+        _ensure_cache()
+        events = list(_events_cache)
     # Most recent first
     events = list(reversed(events))
     return events[:limit]
@@ -166,8 +192,10 @@ def get_events(limit: int = 100) -> list[dict]:
 
 def clear_events() -> None:
     """Remove all stored events. Used mainly in tests."""
-    global _append_count, _approx_total
+    global _append_count, _approx_total, _events_cache, _cache_initialized
     with _lock:
         _write_raw([])
         _append_count = 0
         _approx_total = 0
+        _events_cache = []
+        _cache_initialized = True

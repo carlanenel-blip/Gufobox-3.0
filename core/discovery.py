@@ -2,6 +2,7 @@ import socket
 import eventlet
 from zeroconf import ServiceInfo, Zeroconf
 from core.utils import log
+from config import API_VERSION
 
 _zeroconf = None
 
@@ -27,7 +28,7 @@ def init_mdns_discovery():
             "GufoBox API._http._tcp.local.",
             addresses=[socket.inet_aton(ip_addr)],
             port=5000,
-            properties={"version": "1.0", "type": "smart_speaker_kids"},
+            properties={"version": API_VERSION, "type": "smart_speaker_kids"},
             server="gufobox.local."
         )
 

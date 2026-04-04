@@ -80,6 +80,15 @@ EVENT_LOG_FILE = os.path.join(LOG_DIR, "events.jsonl")
 # LED Master
 LED_MASTER_FILE = os.path.join(DATA_DIR, "led_master.json")
 
+# LED WS2813 Configuration
+LED_COUNT      = int(os.environ.get("GUFOBOX_LED_COUNT", "12"))
+LED_PIN        = int(os.environ.get("GUFOBOX_LED_PIN", "12"))
+LED_FREQ_HZ    = int(os.environ.get("GUFOBOX_LED_FREQ_HZ", "800000"))
+LED_DMA        = int(os.environ.get("GUFOBOX_LED_DMA", "10"))
+LED_BRIGHTNESS = int(os.environ.get("GUFOBOX_LED_BRIGHTNESS", "255"))
+LED_INVERT     = os.environ.get("GUFOBOX_LED_INVERT", "false").lower() in ("true", "1", "yes")
+LED_CHANNEL    = int(os.environ.get("GUFOBOX_LED_CHANNEL", "0"))
+
 
 # Cookie Settings
 SESSION_COOKIE_SECURE = os.environ.get("GUFOBOX_COOKIE_SECURE", "0") == "1"

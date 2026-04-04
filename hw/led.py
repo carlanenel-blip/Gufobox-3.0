@@ -3,6 +3,7 @@ import random
 import eventlet
 from core.state import led_runtime, bus
 from core.utils import log
+from config import LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_BRIGHTNESS, LED_INVERT, LED_CHANNEL
 
 try:
     from rpi_ws281x import Adafruit_NeoPixel, Color
@@ -13,14 +14,6 @@ except ImportError:
 # =========================================================
 # CONFIGURAZIONE STRISCIA LED WS2813
 # =========================================================
-LED_COUNT      = 12      # Numero di LED nella tua striscia (modifica se necessario)
-LED_PIN        = 12      # Pin PWM che hai scelto (ottimo per evitare conflitti I2S)
-LED_FREQ_HZ    = 800000  # Frequenza del segnale LED (solitamente 800khz)
-LED_DMA        = 10      # Canale DMA da usare per generare il segnale
-LED_BRIGHTNESS = 255     # Luminosità massima (0-255)
-LED_INVERT     = False   # True se usi un transistor NPN per traslare il livello logico a 5V
-LED_CHANNEL    = 0       # Canale PWM (0 per GPIO12)
-
 strip = None
 
 def init_leds():
@@ -51,6 +44,8 @@ def set_all_color(color):
 
 def _hex_to_color(hex_str):
     """Converte un colore hex (#rrggbb) in un oggetto Color NeoPixel."""
+    if Color is None:
+        return 0
     try:
         h = hex_str.lstrip("#")
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -97,11 +92,13 @@ def _led_worker():
             eventlet.sleep(1)
             
         elif effect == "breathing":
-            brightness = int((math.sin(step / 10.0) + 1.0) * 127.0)
+            max_b = int(brightness_pct * 255 / 100)
+            brightness = int((math.sin(step / 10.0) + 1.0) / 2.0 * max_b)
             strip.setBrightness(brightness)
             set_all_color(_hex_to_color(color_hex))
             strip.show()
             step += 1
+            step = step % 100000
             eventlet.sleep(sleep_time)
 
         elif effect == "blink":
@@ -116,6 +113,7 @@ def _led_worker():
                 strip.setPixelColor(i, wheel(pixel_index & 255))
             strip.show()
             step += 5
+            step = step % 100000
             eventlet.sleep(sleep_time)
 
         elif effect == "pulse":
@@ -146,6 +144,7 @@ def _led_worker():
             strip.setPixelColor(pos, _hex_to_color(color_hex))
             strip.show()
             step += 1
+            step = step % 100000
             eventlet.sleep(sleep_time)
 
         elif effect == "twinkle":
@@ -155,6 +154,7 @@ def _led_worker():
                 strip.setPixelColor(idx, _hex_to_color(color_hex))
             strip.show()
             step += 1
+            step = step % 100000
             eventlet.sleep(sleep_time)
 
         elif effect == "fire":
@@ -166,6 +166,7 @@ def _led_worker():
                 strip.setPixelColor(i, Color(r, g, b))
             strip.show()
             step += 1
+            step = step % 100000
             eventlet.sleep(sleep_time * 0.5)
 
         else:

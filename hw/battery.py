@@ -57,7 +57,7 @@ def play_ai_notification(text):
 
     try:
         client = OpenAI(api_key=api_key)
-        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+        text_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()[:32]
         audio_path = os.path.join(AI_TTS_CACHE_DIR, f"notif_{text_hash}.mp3")
 
         if not os.path.exists(audio_path):
@@ -153,8 +153,12 @@ def _battery_watchdog():
                             "Zzz... il gufetto si addormenta adesso... a presto amichetto! "
                             "Non dimenticare di caricarmi!"
                         )
-                        from core.hardware import perform_standby
-                        perform_standby()
+                        # Import lazy per evitare circular import con core.hardware
+                        try:
+                            from core.hardware import perform_standby
+                            perform_standby()
+                        except ImportError:
+                            log("Impossibile importare perform_standby: circular import?", "error")
 
             # Resetta gli alert se la batteria è tornata su (in carica o > 25%)
             if charging or percent > 25:

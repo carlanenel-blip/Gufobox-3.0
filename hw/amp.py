@@ -1,4 +1,7 @@
-from gpiozero import DigitalOutputDevice
+try:
+    from gpiozero import DigitalOutputDevice
+except ImportError:
+    DigitalOutputDevice = None
 import eventlet
 from core.utils import log
 
@@ -8,14 +11,18 @@ from core.utils import log
 PIN_AMP_TRIGGER = 20  # Accende/Spegne l'alimentazione all'amplificatore
 PIN_AMP_MUTE    = 26  # Mette in muto il PAM8406
 
-try:
-    # Inizializziamo i pin (di default li teniamo spenti/mutati)
-    amp_trigger = DigitalOutputDevice(PIN_AMP_TRIGGER, initial_value=False)
-    amp_mute = DigitalOutputDevice(PIN_AMP_MUTE, initial_value=True) # Assumendo che True = Mute (Active High/Low dipende dal cablaggio)
-except Exception as e:
-    log(f"Errore inizializzazione pin Amplificatore: {e}", "error")
-    amp_trigger = None
-    amp_mute = None
+amp_trigger = None
+amp_mute = None
+
+if DigitalOutputDevice is not None:
+    try:
+        # Inizializziamo i pin (di default li teniamo spenti/mutati)
+        amp_trigger = DigitalOutputDevice(PIN_AMP_TRIGGER, initial_value=False)
+        amp_mute = DigitalOutputDevice(PIN_AMP_MUTE, initial_value=True) # Assumendo che True = Mute (Active High/Low dipende dal cablaggio)
+    except Exception as e:
+        log(f"Errore inizializzazione pin Amplificatore: {e}", "error")
+        amp_trigger = None
+        amp_mute = None
 
 def amp_on():
     """Accende l'amplificatore e toglie il mute in modo morbido (anti-pop)"""
