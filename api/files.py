@@ -24,6 +24,7 @@ import mimetypes
 import time as _time
 import zipfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 
@@ -34,6 +35,10 @@ from core.jobs import create_job, update_job, finish_job
 from core.event_log import log_event
 
 files_bp = Blueprint('files', __name__)
+
+# Pool di thread limitato per le operazioni file asincrone (copia, sposta, comprimi, decomprimi).
+# Limita a 4 worker per evitare esaurimento risorse in caso di richieste simultanee.
+_file_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="files_job")
 
 # =========================================================
 # HELPER: sicurezza path
@@ -473,8 +478,7 @@ def api_files_copy():
     job = create_job("file_copy",
                      f"Copia {len(safe_srcs)} elementi in {os.path.basename(real_dst)}",
                      items_total=len(safe_srcs))
-    threading.Thread(target=_run_copy, args=(job["job_id"], safe_srcs, real_dst),
-                     daemon=True).start()
+    _file_executor.submit(_run_copy, job["job_id"], safe_srcs, real_dst)
     return jsonify({"status": "ok", "job": job})
 
 
@@ -499,8 +503,7 @@ def api_files_move():
     job = create_job("file_move",
                      f"Sposta {len(safe_srcs)} elementi in {os.path.basename(real_dst)}",
                      items_total=len(safe_srcs))
-    threading.Thread(target=_run_move, args=(job["job_id"], safe_srcs, real_dst),
-                     daemon=True).start()
+    _file_executor.submit(_run_move, job["job_id"], safe_srcs, real_dst)
     return jsonify({"status": "ok", "job": job})
 
 
@@ -529,9 +532,7 @@ def api_files_compress():
     job = create_job("file_compress",
                      f"Comprimi {len(safe_srcs)} elementi in {archive_name}.zip",
                      items_total=len(safe_srcs))
-    threading.Thread(target=_run_compress,
-                     args=(job["job_id"], safe_srcs, real_dst, archive_name),
-                     daemon=True).start()
+    _file_executor.submit(_run_compress, job["job_id"], safe_srcs, real_dst, archive_name)
     return jsonify({"status": "ok", "job": job})
 
 
@@ -556,9 +557,7 @@ def api_files_uncompress():
     job = create_job("file_uncompress",
                      f"Decomprimi {os.path.basename(real_archive)}",
                      items_total=1)
-    threading.Thread(target=_run_uncompress,
-                     args=(job["job_id"], real_archive, real_dst),
-                     daemon=True).start()
+    _file_executor.submit(_run_uncompress, job["job_id"], real_archive, real_dst)
     return jsonify({"status": "ok", "job": job})
 
 

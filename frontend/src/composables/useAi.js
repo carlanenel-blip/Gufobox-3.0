@@ -24,6 +24,10 @@ export function useAi() {
       speechSupported.value = false
       return
     }
+    // Rileva Safari/iOS: su questi browser l'API esiste ma ha limitazioni severe
+    // (non funziona in background, richiede interazione utente, instabile su iOS).
+    // Non disabilitiamo qui speechSupported perché l'API è presente; il feedback
+    // specifico viene dato al momento dell'errore in onerror e in toggleListening().
     speechSupported.value = true
     recognition = new SpeechRecognition()
     recognition.lang = 'it-IT'
@@ -52,6 +56,10 @@ export function useAi() {
         aiError.value = 'Microfono non autorizzato. Controlla i permessi del browser.'
       } else if (e.error === 'no-speech') {
         aiError.value = 'Nessun audio rilevato. Riprova.'
+      } else if (e.error === 'service-not-allowed') {
+        // Errore tipico di Safari iOS quando il contesto non è sicuro o l'utente non ha
+        // ancora interagito con la pagina.
+        aiError.value = 'Microfono non disponibile. Su Safari/iOS apri la pagina tramite HTTPS e premi il tasto prima di parlare.'
       } else {
         aiError.value = `Errore microfono: ${e.error}`
       }
@@ -71,7 +79,18 @@ export function useAi() {
 
   function toggleListening() {
     if (!speechSupported.value || !recognition) {
-      aiError.value = 'Il tuo browser non supporta il riconoscimento vocale.'
+      // Messaggio differenziato per Safari/iOS dove l'API manca completamente
+      const isIOS = typeof navigator !== 'undefined' &&
+        /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+      const isSafariBrowser = typeof navigator !== 'undefined' &&
+        /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+      if (isIOS) {
+        aiError.value = 'Il riconoscimento vocale non è supportato su iOS. Usa Chrome per Android o digita il messaggio.'
+      } else if (isSafariBrowser) {
+        aiError.value = 'Il riconoscimento vocale non è supportato su Safari. Usa Chrome o Firefox.'
+      } else {
+        aiError.value = 'Il tuo browser non supporta il riconoscimento vocale.'
+      }
       return
     }
     aiError.value = null
