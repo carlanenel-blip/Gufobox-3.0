@@ -45,10 +45,13 @@ def secure_open_read(path, allowed_roots):
     """TOCTOU Security: Previene race condition sui symlink usando i file descriptors"""
     try:
         path_abs = os.path.realpath(path)
-        if not any(
-            path_abs == os.path.realpath(r) or path_abs.startswith(os.path.realpath(r) + os.sep)
-            for r in allowed_roots
-        ):
+        allowed = False
+        for root in allowed_roots:
+            root_abs = os.path.realpath(root)
+            if path_abs == root_abs or path_abs.startswith(root_abs + os.sep):
+                allowed = True
+                break
+        if not allowed:
             raise ValueError("Access Denied")
         # Apre con O_NOFOLLOW per impedire il parsing di link simbolici creati all'ultimo ms
         fd = os.open(path_abs, os.O_RDONLY | os.O_NOFOLLOW)

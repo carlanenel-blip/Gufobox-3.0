@@ -188,9 +188,6 @@ def api_alarm_snooze(alarm_id):
                 # Se scatta l'ora successiva
                 if a["minute"] < 5:
                     a["hour"] = (a.get("hour", 0) + 1) % 24
-                new_hour = a["hour"]
-                new_minute = a["minute"]
-
                 # Ferma la musica che sta suonando ora
                 stop_player()
                 try:
@@ -203,7 +200,7 @@ def api_alarm_snooze(alarm_id):
                 bus.mark_dirty("alarms")
                 bus.request_emit("public")
                 bus.emit_notification("Sveglia posposta di 5 minuti ⏰", "info")
-                log(f"Sveglia {alarm_id} posposta alle {new_hour:02d}:{new_minute:02d}", "info")
+                log(f"Sveglia {alarm_id} posposta alle {a['hour']:02d}:{a['minute']:02d}", "info")
 
                 return jsonify({"status": "ok", "message": "Snoozed"})
             
@@ -218,6 +215,7 @@ _ota_lock = threading.Lock()
 
 # File/cartelle esclusi da backup e rollback
 _BACKUP_EXCLUSIONS = {".git", "__pycache__", "node_modules", "data", ".env"}
+OTA_UPLOAD_CHUNK_SIZE = 64 * 1024
 
 
 def _ota_log(msg):
@@ -795,7 +793,7 @@ def api_ota_upload():
     try:
         with open(staged_path, "wb") as out:
             while True:
-                chunk = f.stream.read(64 * 1024)
+                chunk = f.stream.read(OTA_UPLOAD_CHUNK_SIZE)
                 if not chunk:
                     break
                 size_bytes += len(chunk)
