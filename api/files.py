@@ -89,6 +89,16 @@ def _file_type(path: str) -> str:
     return "unknown"
 
 
+def _resolve_destination_path(destination: str, dst_name: str, suffix: str):
+    real_dst = _resolve_safe(os.path.join(destination, dst_name))
+    if real_dst is None:
+        return None
+    if os.path.exists(real_dst):
+        base, ext = os.path.splitext(dst_name)
+        real_dst = _resolve_safe(os.path.join(destination, f"{base}_{suffix}{ext}"))
+    return real_dst
+
+
 def _entry_dict(full_path: str) -> dict:
     """Crea il dict di un singolo entry file/cartella."""
     is_dir = os.path.isdir(full_path)
@@ -321,16 +331,10 @@ def _run_copy(job_id: str, sources: list, destination: str):
             errors.append({"path": src, "error": "Non trovato"})
             continue
         dst_name = os.path.basename(src)
-        real_dst = _resolve_safe(os.path.join(destination, dst_name))
+        real_dst = _resolve_destination_path(destination, dst_name, "copy")
         if real_dst is None:
             errors.append({"path": src, "error": "Destinazione non autorizzata"})
             continue
-        if os.path.exists(real_dst):
-            base, ext = os.path.splitext(dst_name)
-            real_dst = _resolve_safe(os.path.join(destination, f"{base}_copy{ext}"))
-            if real_dst is None:
-                errors.append({"path": src, "error": "Destinazione non autorizzata"})
-                continue
         try:
             if os.path.isdir(src):
                 shutil.copytree(src, real_dst)
@@ -364,16 +368,10 @@ def _run_move(job_id: str, sources: list, destination: str):
             errors.append({"path": src, "error": "Non trovato"})
             continue
         dst_name = os.path.basename(src)
-        real_dst = _resolve_safe(os.path.join(destination, dst_name))
+        real_dst = _resolve_destination_path(destination, dst_name, "moved")
         if real_dst is None:
             errors.append({"path": src, "error": "Destinazione non autorizzata"})
             continue
-        if os.path.exists(real_dst):
-            base, ext = os.path.splitext(dst_name)
-            real_dst = _resolve_safe(os.path.join(destination, f"{base}_moved{ext}"))
-            if real_dst is None:
-                errors.append({"path": src, "error": "Destinazione non autorizzata"})
-                continue
         try:
             shutil.move(src, real_dst)
             done += 1

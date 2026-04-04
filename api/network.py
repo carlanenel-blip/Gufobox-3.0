@@ -16,6 +16,7 @@ def _read_wifi_signal(ssid: str | None) -> int:
     code, stdout, _ = run_cmd(["sudo", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL", "dev", "wifi"], timeout=5)
     if code != 0:
         return 0
+    fallback_signal = None
     for line in stdout.splitlines():
         if not line:
             continue
@@ -23,12 +24,17 @@ def _read_wifi_signal(ssid: str | None) -> int:
         if len(parts) != 3:
             continue
         in_use, row_ssid, signal = parts
-        if in_use == "*" or row_ssid == ssid:
+        if in_use == "*":
             try:
                 return max(0, min(100, int(signal)))
             except ValueError:
                 return 0
-    return 0
+        if row_ssid == ssid and fallback_signal is None:
+            try:
+                fallback_signal = max(0, min(100, int(signal)))
+            except ValueError:
+                fallback_signal = 0
+    return fallback_signal or 0
 
 # =========================================================
 # GESTIONE WI-FI
