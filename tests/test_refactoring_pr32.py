@@ -125,32 +125,18 @@ class TestRfidDirectCall:
     def test_direct_trigger_calls_handle_rfid_trigger(self):
         """_trigger_rfid_direct deve delegare a handle_rfid_trigger se disponibile."""
         import hw.rfid as rfid_mod
-        orig_avail = rfid_mod._DIRECT_TRIGGER_AVAILABLE
-        orig_fn = rfid_mod._handle_rfid_trigger
-        try:
-            rfid_mod._DIRECT_TRIGGER_AVAILABLE = True
-            mock_fn = MagicMock(return_value=True)
-            rfid_mod._handle_rfid_trigger = mock_fn
+        mock_fn = MagicMock(return_value=True)
+        with patch("api.rfid.handle_rfid_trigger", mock_fn):
             result = rfid_mod._trigger_rfid_direct("TEST_UID")
-            mock_fn.assert_called_once_with("TEST_UID")
-            assert result is True
-        finally:
-            rfid_mod._DIRECT_TRIGGER_AVAILABLE = orig_avail
-            rfid_mod._handle_rfid_trigger = orig_fn
+        mock_fn.assert_called_once_with("TEST_UID")
+        assert result is True
 
     def test_direct_trigger_returns_false_when_unavailable(self):
         """_trigger_rfid_direct deve ritornare False se il modulo non è disponibile."""
         import hw.rfid as rfid_mod
-        orig_avail = rfid_mod._DIRECT_TRIGGER_AVAILABLE
-        orig_fn = rfid_mod._handle_rfid_trigger
-        try:
-            rfid_mod._DIRECT_TRIGGER_AVAILABLE = False
-            rfid_mod._handle_rfid_trigger = None
+        with patch("builtins.__import__", side_effect=ImportError("no module")):
             result = rfid_mod._trigger_rfid_direct("TEST_UID")
-            assert result is False
-        finally:
-            rfid_mod._DIRECT_TRIGGER_AVAILABLE = orig_avail
-            rfid_mod._handle_rfid_trigger = orig_fn
+        assert result is False
 
     def test_no_requests_import_at_module_level(self):
         """requests non deve essere importato al livello modulo di hw/rfid.py."""
@@ -282,22 +268,21 @@ class TestGracefulShutdown:
 
     def test_shutdown_flag_starts_false(self):
         import core.utils as utils_mod
-        orig = utils_mod._shutdown_requested
-        utils_mod._shutdown_requested = False
+        # Reset the event to ensure clean state
+        utils_mod._shutdown_event.clear()
         try:
             assert utils_mod.is_shutdown_requested() is False
         finally:
-            utils_mod._shutdown_requested = orig
+            utils_mod._shutdown_event.clear()
 
     def test_request_shutdown_sets_flag(self):
         import core.utils as utils_mod
-        orig = utils_mod._shutdown_requested
-        utils_mod._shutdown_requested = False
+        utils_mod._shutdown_event.clear()
         try:
             utils_mod.request_shutdown()
             assert utils_mod.is_shutdown_requested() is True
         finally:
-            utils_mod._shutdown_requested = orig
+            utils_mod._shutdown_event.clear()
 
     def test_all_workers_import_is_shutdown_requested(self):
         """Tutti i moduli worker devono importare is_shutdown_requested."""

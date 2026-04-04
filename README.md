@@ -1,4 +1,4 @@
-# 🦉 GufoBox 2.0
+# 🦉 GufoBox 3.0
 
 Smart speaker educativo per bambini basato su Raspberry Pi.
 
@@ -19,8 +19,8 @@ Smart speaker educativo per bambini basato su Raspberry Pi.
 
 ```bash
 # 1. Clona il repository
-git clone https://github.com/carlanluca-alt/Gufobox-2.0.git
-cd Gufobox-2.0
+git clone https://github.com/carlanluca-alt/Gufobox-3.0.git
+cd Gufobox-3.0
 
 # 2. Crea e attiva un ambiente virtuale Python
 python3 -m venv venv
@@ -106,7 +106,7 @@ Alcune funzioni richiedono hardware fisico e permessi specifici:
 ## Struttura del progetto
 
 ```
-Gufobox-2.0/
+Gufobox-3.0/
 ├── main.py              # Entry point del server Flask
 ├── config.py            # Configurazione globale
 ├── requirements.txt     # Dipendenze Python

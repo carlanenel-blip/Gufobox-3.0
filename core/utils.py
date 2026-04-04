@@ -2,6 +2,8 @@ import os
 import json
 import logging
 import subprocess
+import threading
+import contextvars
 from copy import deepcopy
 from logging.handlers import RotatingFileHandler
 from config import LOG_DIR
@@ -69,28 +71,27 @@ LANG_STRINGS = {
     }
 }
 
-_current_lang = "it"
+_current_lang_var: contextvars.ContextVar[str] = contextvars.ContextVar("current_lang", default="it")
 
 def set_lang(lang_code):
-    global _current_lang
     if lang_code in LANG_STRINGS:
-        _current_lang = lang_code
+        _current_lang_var.set(lang_code)
 
 def t(key):
-    return LANG_STRINGS.get(_current_lang, LANG_STRINGS["it"]).get(key, key)
+    lang = _current_lang_var.get()
+    return LANG_STRINGS.get(lang, LANG_STRINGS["it"]).get(key, key)
 
 # =========================================================
 # GRACEFUL SHUTDOWN FLAG
 # =========================================================
-_shutdown_requested = False
+_shutdown_event = threading.Event()
 
 def request_shutdown():
     """Segnala a tutti i worker di terminare il ciclo principale."""
-    global _shutdown_requested
-    _shutdown_requested = True
+    _shutdown_event.set()
     log("Shutdown richiesto: i worker si fermeranno al prossimo ciclo.", "info")
 
 def is_shutdown_requested() -> bool:
     """Ritorna True se è stato richiesto uno shutdown ordinato."""
-    return _shutdown_requested
+    return _shutdown_event.is_set()
 

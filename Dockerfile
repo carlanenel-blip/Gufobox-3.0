@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Frontend builder — compila il frontend Vue
 # ============================================================
-FROM node:18-slim AS frontend-builder
+FROM node:20-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -25,8 +25,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 # Installa le dipendenze Python
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY requirements.txt requirements-hw.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements-hw.txt || true
 
 # Copia il backend
 COPY . .
