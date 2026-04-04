@@ -14,6 +14,9 @@ from config import MEDIA_EXTENSIONS
 player_lock = threading.Lock()
 player_proc = None
 
+# Lock separato per le modifiche batch a media_runtime (evita letture inconsistenti)
+_media_runtime_lock = threading.Lock()
+
 # Percorso del socket IPC di MPV per il controllo in tempo reale
 MPV_IPC_SOCKET = "/tmp/gufobox-mpv.sock"
 
@@ -161,18 +164,19 @@ def start_player(target, mode="audio_only", rfid_uid=None, playlist_index=0,
     with player_lock:
         player_proc = proc
 
-    # Aggiorna lo stato globale (campi base + PR2 estesi)
-    media_runtime["player_running"] = True
-    media_runtime["player_mode"] = mode
-    media_runtime["current_file"] = target
-    media_runtime["current_rfid_uid"] = rfid_uid
-    media_runtime["resume_position"] = resume_info
-    # Campi PR2
-    media_runtime["current_rfid"] = rfid_uid
-    media_runtime["current_profile_name"] = profile_name
-    media_runtime["current_mode"] = profile_mode or mode
-    media_runtime["current_media_path"] = target
-    media_runtime["playlist_index"] = playlist_index
+    # Aggiorna lo stato globale in modo atomico (evita letture inconsistenti da altri thread)
+    with _media_runtime_lock:
+        media_runtime["player_running"] = True
+        media_runtime["player_mode"] = mode
+        media_runtime["current_file"] = target
+        media_runtime["current_rfid_uid"] = rfid_uid
+        media_runtime["resume_position"] = resume_info
+        # Campi PR2
+        media_runtime["current_rfid"] = rfid_uid
+        media_runtime["current_profile_name"] = profile_name
+        media_runtime["current_mode"] = profile_mode or mode
+        media_runtime["current_media_path"] = target
+        media_runtime["playlist_index"] = playlist_index
 
     # Segnala all'EventBus che deve salvare su SD e avvisare il frontend
     bus.mark_dirty("media")
@@ -183,16 +187,17 @@ def start_player(target, mode="audio_only", rfid_uid=None, playlist_index=0,
 
 def _reset_media_runtime():
     """Azzera i campi media_runtime quando il player si ferma e notifica EventBus."""
-    media_runtime["player_running"] = False
-    media_runtime["player_mode"] = "idle"
-    media_runtime["current_file"] = None
-    media_runtime["current_rfid_uid"] = None
-    media_runtime["current_rfid"] = None
-    media_runtime["current_profile_name"] = None
-    media_runtime["current_mode"] = "idle"
-    media_runtime["current_media_path"] = None
-    media_runtime["current_playlist"] = []
-    media_runtime["playlist_index"] = 0
+    with _media_runtime_lock:
+        media_runtime["player_running"] = False
+        media_runtime["player_mode"] = "idle"
+        media_runtime["current_file"] = None
+        media_runtime["current_rfid_uid"] = None
+        media_runtime["current_rfid"] = None
+        media_runtime["current_profile_name"] = None
+        media_runtime["current_mode"] = "idle"
+        media_runtime["current_media_path"] = None
+        media_runtime["current_playlist"] = []
+        media_runtime["playlist_index"] = 0
     bus.mark_dirty("media")
     bus.request_emit("public")
 

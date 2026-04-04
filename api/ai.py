@@ -35,6 +35,9 @@ _AI_FALLBACK_REPLIES = [
 _TTS_CACHE_MAX_FILES = 200        # Numero massimo file in cache
 _TTS_CACHE_MAX_AGE_SEC = 7 * 86400  # 7 giorni
 
+# Lunghezza massima del messaggio utente per proteggere i token OpenAI
+_AI_CHAT_MAX_TEXT = 2000
+
 
 def cleanup_tts_cache():
     """Rimuove file TTS dalla cache se troppo vecchi o troppo numerosi."""
@@ -395,6 +398,9 @@ def api_ai_chat():
     
     if not user_text:
         return jsonify({"error": "Testo vuoto"}), 400
+
+    if len(user_text) > _AI_CHAT_MAX_TEXT:
+        return jsonify({"error": f"Messaggio troppo lungo (max {_AI_CHAT_MAX_TEXT} caratteri)"}), 400
 
     client = get_openai_client()
     if not client:
