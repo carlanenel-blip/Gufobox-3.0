@@ -321,10 +321,16 @@ def _run_copy(job_id: str, sources: list, destination: str):
             errors.append({"path": src, "error": "Non trovato"})
             continue
         dst_name = os.path.basename(src)
-        real_dst = os.path.join(destination, dst_name)
+        real_dst = _resolve_safe(os.path.join(destination, dst_name))
+        if real_dst is None:
+            errors.append({"path": src, "error": "Destinazione non autorizzata"})
+            continue
         if os.path.exists(real_dst):
             base, ext = os.path.splitext(dst_name)
-            real_dst = os.path.join(destination, f"{base}_copy{ext}")
+            real_dst = _resolve_safe(os.path.join(destination, f"{base}_copy{ext}"))
+            if real_dst is None:
+                errors.append({"path": src, "error": "Destinazione non autorizzata"})
+                continue
         try:
             if os.path.isdir(src):
                 shutil.copytree(src, real_dst)
@@ -358,10 +364,16 @@ def _run_move(job_id: str, sources: list, destination: str):
             errors.append({"path": src, "error": "Non trovato"})
             continue
         dst_name = os.path.basename(src)
-        real_dst = os.path.join(destination, dst_name)
+        real_dst = _resolve_safe(os.path.join(destination, dst_name))
+        if real_dst is None:
+            errors.append({"path": src, "error": "Destinazione non autorizzata"})
+            continue
         if os.path.exists(real_dst):
             base, ext = os.path.splitext(dst_name)
-            real_dst = os.path.join(destination, f"{base}_moved{ext}")
+            real_dst = _resolve_safe(os.path.join(destination, f"{base}_moved{ext}"))
+            if real_dst is None:
+                errors.append({"path": src, "error": "Destinazione non autorizzata"})
+                continue
         try:
             shutil.move(src, real_dst)
             done += 1

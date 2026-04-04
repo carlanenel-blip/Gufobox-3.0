@@ -17,12 +17,12 @@ It is intentionally NOT persisted across reboots – a new RFID scan restarts it
 import threading
 from core.utils import log
 from core.event_log import log_event
+from core.edu_config import VALID_AGE_GROUPS, VALID_LANGUAGE_TARGETS
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 VALID_CATEGORIES = {"school", "entertainment"}
-VALID_AGE_GROUPS = {"bambino", "ragazzo", "adulto"}
 
 # Activities available per category (order matters for UI display)
 CATEGORY_ACTIVITIES = {
@@ -46,7 +46,7 @@ ACTIVITIES_NEEDING_LANGUAGE = {"foreign_languages"}
 # Activities that require a learning_step selection
 ACTIVITIES_NEEDING_STEP = {"foreign_languages"}
 
-VALID_LANGUAGES = {"english", "spanish", "german", "french", "japanese", "chinese"}
+VALID_LANGUAGES = VALID_LANGUAGE_TARGETS
 
 STAGE_AGE = "age_group"
 STAGE_ACTIVITY = "activity_mode"

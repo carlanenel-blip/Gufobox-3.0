@@ -1,8 +1,9 @@
 import os
 import eventlet
+from copy import deepcopy
 from datetime import datetime, timedelta
 
-from core.state import media_runtime, alarms_list, bus, now_ts
+from core.state import media_runtime, alarms_list, alarms_lock, bus, now_ts
 from core.utils import log, run_cmd
 from hw.amp import amp_on, amp_off
 
@@ -175,7 +176,7 @@ def get_standby_details() -> dict:
     return dict(_standby_details)
 
 
-def perform_standby():
+def perform_standby(announcement: str | None = "Uhuu, che sonno! Faccio un pisolino. A dopo!"):
     """
     Mette la GufoBox in stato di standby a basso consumo.
     - Ferma player e amplificatore
@@ -192,8 +193,9 @@ def perform_standby():
         return
 
     bus.emit_notification("GufoBox in Standby profondo... 🌙", "warning")
-    play_ai_notification("Uhuu, che sonno! Faccio un pisolino. A dopo!")
-    eventlet.sleep(3)
+    if announcement:
+        play_ai_notification(announcement)
+        eventlet.sleep(3)
 
     stop_player()
     amp_off()
@@ -250,7 +252,9 @@ def wake_from_standby(reason: str = "button"):
     """
     global _standby_state, _standby_details
 
-    if _standby_state not in (STANDBY_STANDBY, STANDBY_WAKING):
+    previous_state = _standby_state
+
+    if previous_state not in (STANDBY_STANDBY, STANDBY_WAKING, STANDBY_ALARM_ACTIVE):
         log(f"wake_from_standby: stato corrente '{_standby_state}', skip.", "warning")
         return
 
@@ -259,33 +263,34 @@ def wake_from_standby(reason: str = "button"):
     _standby_details["last_wake_reason"] = reason
     log(f"Wake dallo standby (motivo: {reason}): reinizializzazione hardware...", "info")
 
-    # Ripristina HDMI
-    run_cmd(["sudo", "vcgencmd", "display_power", "1"])
-
-    # Ripristina Bluetooth
-    run_cmd(["sudo", "rfkill", "unblock", "bluetooth"])
-
-    # Ripristina WiFi se era stato bloccato
-    if _standby_details.get("wifi_blocked"):
-        _unblock_wifi()
-
-    # Ripristina USB
-    if _standby_details.get("usb_suspended"):
-        _resume_usb()
-
-    # Ripristina CPU governor
     prev_gov = _standby_details.get("previous_governor")
-    if prev_gov:
-        _set_governor(prev_gov)
-    else:
-        _set_governor("ondemand")
+    if previous_state in (STANDBY_STANDBY, STANDBY_WAKING):
+        # Ripristina HDMI
+        run_cmd(["sudo", "vcgencmd", "display_power", "1"])
 
-    amp_on()
+        # Ripristina Bluetooth
+        run_cmd(["sudo", "rfkill", "unblock", "bluetooth"])
 
-    # Riabilita LED
-    from core.state import led_runtime
-    led_runtime["master_enabled"] = True
-    bus.mark_dirty("led")
+        # Ripristina WiFi se era stato bloccato
+        if _standby_details.get("wifi_blocked"):
+            _unblock_wifi()
+
+        # Ripristina USB
+        if _standby_details.get("usb_suspended"):
+            _resume_usb()
+
+        # Ripristina CPU governor
+        if prev_gov:
+            _set_governor(prev_gov)
+        else:
+            _set_governor("ondemand")
+
+        amp_on()
+
+        # Riabilita LED
+        from core.state import led_runtime
+        led_runtime["master_enabled"] = True
+        bus.mark_dirty("led")
 
     _standby_state = STANDBY_AWAKE
     _standby_details.update({
@@ -303,8 +308,9 @@ def wake_from_standby(reason: str = "button"):
         _lev("standby", "info", f"Wake da standby completato (motivo: {reason})")
     except Exception:
         pass
-    from hw.battery import play_ai_notification
-    play_ai_notification("Uhuu! Sono sveglio e pronto a giocare!")
+    if previous_state in (STANDBY_STANDBY, STANDBY_WAKING):
+        from hw.battery import play_ai_notification
+        play_ai_notification("Uhuu! Sono sveglio e pronto a giocare!")
 
 
 def _wake_for_alarm():
@@ -380,7 +386,9 @@ def _alarm_worker():
         weekday = now.weekday()  # 0=Lun, 6=Dom
         slot = (now.hour, now.minute)  # chiave di debounce per questo minuto
 
-        for alarm in list(alarms_list):
+        with alarms_lock:
+            alarms_snapshot = deepcopy(alarms_list)
+        for alarm in alarms_snapshot:
             if not alarm.get("enabled"):
                 continue
             if alarm.get("hour") != now.hour or alarm.get("minute") != now.minute:
@@ -449,5 +457,4 @@ def init_hardware_workers():
     _ensure_ntp_sync()
     eventlet.spawn(_sleep_timer_worker)
     eventlet.spawn(_alarm_worker)
-
 

@@ -9,6 +9,27 @@ from config import HOTSPOT_SSID, HOTSPOT_PASS, HOTSPOT_CONN_NAME
 
 network_bp = Blueprint('network', __name__)
 
+
+def _read_wifi_signal(ssid: str | None) -> int:
+    if not ssid:
+        return 0
+    code, stdout, _ = run_cmd(["sudo", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL", "dev", "wifi"], timeout=5)
+    if code != 0:
+        return 0
+    for line in stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        in_use, row_ssid, signal = parts
+        if in_use == "*" or row_ssid == ssid:
+            try:
+                return max(0, min(100, int(signal)))
+            except ValueError:
+                return 0
+    return 0
+
 # =========================================================
 # GESTIONE WI-FI
 # =========================================================
@@ -38,7 +59,7 @@ def api_network_status():
         "connected": bool(ssid),
         "ssid": ssid,
         "ip": ip,
-        "signal": 85 if ssid else 0,
+        "signal": _read_wifi_signal(ssid),
         "hotspot_active": hotspot_active,
         "hotspot_ssid": HOTSPOT_SSID if hotspot_active else None,
     })
@@ -584,4 +605,3 @@ def api_bluetooth_source_mode_post():
         "mode": "source" if enable else "idle",
         "partial_failure": bool(errors),
     })
-

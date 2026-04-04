@@ -188,6 +188,18 @@ class TestStandbyStateMachine:
             hw.wake_from_standby()
         mock_amp.assert_not_called()
 
+    def test_wake_from_alarm_active_sets_awake_without_hardware_resume(self):
+        import core.hardware as hw
+        hw._standby_state = hw.STANDBY_ALARM_ACTIVE
+        with patch("core.hardware.run_cmd") as mock_run, \
+             patch("core.hardware.amp_on") as mock_amp, \
+             patch("hw.battery.play_ai_notification") as mock_audio:
+            hw.wake_from_standby("button")
+        assert hw._standby_state == hw.STANDBY_AWAKE
+        mock_run.assert_not_called()
+        mock_amp.assert_not_called()
+        mock_audio.assert_not_called()
+
     def test_wake_for_alarm_sets_alarm_active(self):
         """_wake_for_alarm must transition to alarm_active state."""
         import core.hardware as hw

@@ -206,6 +206,24 @@ class TestOtaStateHelpers:
             )
         assert rv.status_code in (200, 409)
 
+    def test_run_ota_app_reports_missing_git(self, tmp_path):
+        import api.system as sys_mod
+
+        ota_state = tmp_path / "ota_state.json"
+        ota_log = tmp_path / "ota.log"
+
+        with patch.object(sys_mod, "OTA_STATE_FILE", str(ota_state)), \
+             patch.object(sys_mod, "OTA_LOG_FILE", str(ota_log)), \
+             patch.object(sys_mod, "_create_backup", return_value="backup-ok"), \
+             patch("api.system.shutil.which", return_value=None), \
+             patch.object(sys_mod.bus, "emit_notification"), \
+             patch("api.system.log_event"):
+            sys_mod._run_ota("app")
+
+        data = json.loads(ota_state.read_text())
+        assert data["status"] == "error"
+        assert "git" in (data["error"] or "").lower()
+
 
 # ─── B) Backup name sanitization / path traversal ────────────────────────────
 
@@ -343,6 +361,18 @@ class TestStandbyLogic:
             hw.wake_from_standby()
         assert hw.is_in_standby() is False
 
+    def test_wake_from_alarm_active_skips_welcome_audio(self):
+        import core.hardware as hw
+        hw._standby_state = hw.STANDBY_ALARM_ACTIVE
+        with patch("core.hardware.run_cmd"), \
+             patch("core.hardware.amp_on"), \
+             patch("hw.battery.play_ai_notification") as mock_audio, \
+             patch.object(hw.bus, "request_emit"), \
+             patch.object(hw.bus, "mark_dirty"):
+            hw.wake_from_standby(reason="button")
+        assert hw._standby_state == hw.STANDBY_AWAKE
+        mock_audio.assert_not_called()
+
     def test_alarm_worker_wakes_from_standby(self):
         """_alarm_worker calls _wake_for_alarm when standby is active."""
         import core.hardware as hw
@@ -405,6 +435,18 @@ class TestNetworkScanPost:
             mock_cmd.return_value = (0, "", "")
             rv = network_client.get("/api/network/scan")
         assert rv.status_code == 200
+
+    def test_network_status_reads_real_signal(self, network_client):
+        with patch("api.network.run_cmd") as mock_cmd:
+            mock_cmd.side_effect = [
+                (0, "HomeWifi", ""),
+                (0, "192.168.1.10", ""),
+                (0, "", ""),
+                (0, "*:HomeWifi:67\n:Other:31", ""),
+            ]
+            rv = network_client.get("/api/network/status")
+        assert rv.status_code == 200
+        assert rv.get_json()["signal"] == 67
 
 
 # ─── F) Bluetooth /unblock and /pair ─────────────────────────────────────────

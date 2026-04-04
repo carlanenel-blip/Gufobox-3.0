@@ -149,14 +149,13 @@ def _battery_watchdog():
 
                     # Sotto il 5% forza lo standby per non rovinare le celle
                     if percent <= 5:
-                        play_ai_notification(
-                            "Zzz... il gufetto si addormenta adesso... a presto amichetto! "
-                            "Non dimenticare di caricarmi!"
-                        )
                         # Import lazy per evitare circular import con core.hardware
                         try:
                             from core.hardware import perform_standby
-                            perform_standby()
+                            perform_standby(
+                                announcement="Zzz... il gufetto si addormenta adesso... a presto amichetto! "
+                                             "Non dimenticare di caricarmi!"
+                            )
                         except ImportError:
                             log("Impossibile importare perform_standby: circular import?", "error")
 
@@ -169,4 +168,3 @@ def _battery_watchdog():
 
 def init_battery():
     eventlet.spawn(_battery_watchdog)
-

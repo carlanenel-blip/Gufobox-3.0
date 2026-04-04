@@ -15,8 +15,9 @@ Lo stato viene tenuto in RAM in core.state.jobs_state e salvato su JOB_STATE_FIL
 
 import uuid
 import time
+from copy import deepcopy
 
-from core.state import jobs_state, bus, save_json_direct
+from core.state import jobs_state, jobs_state_lock, bus, save_json_direct
 from core.utils import log
 from config import JOB_STATE_FILE
 
@@ -29,7 +30,7 @@ def _now():
 
 
 def _persist():
-    save_json_direct(JOB_STATE_FILE, jobs_state)
+    save_json_direct(JOB_STATE_FILE, deepcopy(jobs_state))
     bus.request_emit("jobs")
 
 
@@ -65,10 +66,11 @@ def create_job(
         "finished_ts": None,
     }
     job.update(extra)
-    jobs_state[job_id] = job
-    _persist()
+    with jobs_state_lock:
+        jobs_state[job_id] = job
+        _persist()
     log(f"Job creato: {job_id} ({job_type}) — {description}", "info")
-    return job
+    return deepcopy(job)
 
 
 def update_job(job_id: str, **fields) -> dict | None:
@@ -77,14 +79,15 @@ def update_job(job_id: str, **fields) -> dict | None:
     Aggiorna automaticamente updated_ts.
     Ritorna il job aggiornato o None se non trovato.
     """
-    job = jobs_state.get(job_id)
-    if job is None:
-        log(f"update_job: job {job_id} non trovato", "warning")
-        return None
-    fields["updated_ts"] = _now()
-    job.update(fields)
-    _persist()
-    return job
+    with jobs_state_lock:
+        job = jobs_state.get(job_id)
+        if job is None:
+            log(f"update_job: job {job_id} non trovato", "warning")
+            return None
+        fields["updated_ts"] = _now()
+        job.update(fields)
+        _persist()
+        return deepcopy(job)
 
 
 def finish_job(
@@ -96,22 +99,23 @@ def finish_job(
     """
     Segna un job come terminato (done/error/canceled).
     """
-    job = jobs_state.get(job_id)
-    if job is None:
-        return None
-    now = _now()
-    job["status"] = status
-    job["updated_ts"] = now
-    job["finished_ts"] = now
-    if message is not None:
-        job["message"] = message
-    if error is not None:
-        job["error"] = error
-    if status == "done":
-        job["progress_percent"] = 100
-    _persist()
+    with jobs_state_lock:
+        job = jobs_state.get(job_id)
+        if job is None:
+            return None
+        now = _now()
+        job["status"] = status
+        job["updated_ts"] = now
+        job["finished_ts"] = now
+        if message is not None:
+            job["message"] = message
+        if error is not None:
+            job["error"] = error
+        if status == "done":
+            job["progress_percent"] = 100
+        _persist()
     log(f"Job {job_id} terminato con status={status}", "info")
-    return job
+    return deepcopy(job)
 
 
 def cancel_job(job_id: str) -> dict | None:
@@ -120,24 +124,27 @@ def cancel_job(job_id: str) -> dict | None:
     Imposta cancel_requested=True; il worker deve controllare questo flag.
     Se il job è già terminato, lo segna come canceled direttamente.
     """
-    job = jobs_state.get(job_id)
-    if job is None:
-        return None
-    if job["status"] in ("done", "error", "canceled"):
-        return job  # Niente da fare
-    job["cancel_requested"] = True
-    job["updated_ts"] = _now()
-    # Se era in pending, cancelliamo subito
-    if job["status"] == "pending":
-        job["status"] = "canceled"
-        job["finished_ts"] = _now()
-    _persist()
+    with jobs_state_lock:
+        job = jobs_state.get(job_id)
+        if job is None:
+            return None
+        if job["status"] in ("done", "error", "canceled"):
+            return deepcopy(job)
+        job["cancel_requested"] = True
+        job["updated_ts"] = _now()
+        # Se era in pending, cancelliamo subito
+        if job["status"] == "pending":
+            job["status"] = "canceled"
+            job["finished_ts"] = _now()
+        _persist()
     log(f"Cancellazione richiesta per job {job_id}", "info")
-    return job
+    return deepcopy(job)
 
 
 def get_job(job_id: str) -> dict | None:
-    return jobs_state.get(job_id)
+    with jobs_state_lock:
+        job = jobs_state.get(job_id)
+        return deepcopy(job) if job is not None else None
 
 
 def list_jobs(include_old: bool = False) -> list:
@@ -147,12 +154,13 @@ def list_jobs(include_old: bool = False) -> list:
     """
     now = _now()
     result = []
-    for job in jobs_state.values():
-        if not include_old:
-            finished = job.get("finished_ts") or 0
-            if job["status"] in ("done", "error", "canceled") and (now - finished) > _DEFAULT_MAX_AGE_SEC:
-                continue
-        result.append(job)
+    with jobs_state_lock:
+        for job in jobs_state.values():
+            if not include_old:
+                finished = job.get("finished_ts") or 0
+                if job["status"] in ("done", "error", "canceled") and (now - finished) > _DEFAULT_MAX_AGE_SEC:
+                    continue
+            result.append(deepcopy(job))
     return sorted(result, key=lambda j: j.get("created_ts", 0), reverse=True)
 
 
@@ -162,14 +170,15 @@ def cleanup_old_jobs(max_age_sec: int = _DEFAULT_MAX_AGE_SEC) -> int:
     Ritorna il numero di job rimossi.
     """
     now = _now()
-    to_remove = [
-        jid for jid, job in jobs_state.items()
-        if job["status"] in ("done", "error", "canceled")
-        and (now - (job.get("finished_ts") or 0)) > max_age_sec
-    ]
-    for jid in to_remove:
-        del jobs_state[jid]
-    if to_remove:
-        _persist()
-        log(f"Cleanup jobs: rimossi {len(to_remove)} job vecchi", "info")
+    with jobs_state_lock:
+        to_remove = [
+            jid for jid, job in jobs_state.items()
+            if job["status"] in ("done", "error", "canceled")
+            and (now - (job.get("finished_ts") or 0)) > max_age_sec
+        ]
+        for jid in to_remove:
+            del jobs_state[jid]
+        if to_remove:
+            _persist()
+            log(f"Cleanup jobs: rimossi {len(to_remove)} job vecchi", "info")
     return len(to_remove)

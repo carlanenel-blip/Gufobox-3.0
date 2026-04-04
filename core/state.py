@@ -15,6 +15,8 @@ from core.extensions import socketio
 from core.utils import log, is_shutdown_requested
 
 _json_write_lock = threading.Lock()
+alarms_lock = threading.RLock()
+jobs_state_lock = threading.RLock()
 
 def now_ts():
     return int(time.time())
@@ -130,11 +132,12 @@ rss_runtime = load_json(RSS_RUNTIME_FILE, {})
 def get_jobs_list_sorted():
     now = now_ts()
     out = []
-    for jid, job in jobs_state.items():
-        finished = job.get("finished_ts") or job.get("end_ts", 0)
-        if job.get("status") in ["done", "error", "canceled"] and (now - finished) > 86400:
-            continue
-        out.append(job)
+    with jobs_state_lock:
+        for jid, job in jobs_state.items():
+            finished = job.get("finished_ts") or job.get("end_ts", 0)
+            if job.get("status") in ["done", "error", "canceled"] and (now - finished) > 86400:
+                continue
+            out.append(deepcopy(job))
     return sorted(out, key=lambda x: x.get("created_ts", x.get("start_ts", 0)), reverse=True)
 
 def build_public_snapshot():
@@ -266,4 +269,3 @@ class EventBus:
 
 # Istanza globale utilizzata da tutto il progetto
 bus = EventBus()
-
