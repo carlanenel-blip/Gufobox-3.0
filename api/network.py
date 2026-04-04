@@ -437,6 +437,13 @@ def api_bluetooth_connect():
     code, _, err = run_cmd(["bluetoothctl", "connect", mac], timeout=15)
 
     if code == 0:
+        # Disabilita le casse interne quando connesso a device audio esterno
+        try:
+            from hw.amp import amp_off
+            amp_off()
+            log("Amplificatore interno spento (audio via BT esterno)", "info")
+        except Exception as amp_e:
+            log(f"Errore spegnimento amp interno: {amp_e}", "warning")
         bus.emit_notification(f"Bluetooth connesso a {mac}!", "success")
         log_event("bluetooth", "info", f"Bluetooth connesso a {mac}", {"mac": mac})
         return jsonify({"status": "ok", "mac": mac})
@@ -460,6 +467,13 @@ def api_bluetooth_disconnect():
                     )
                     if code_i == 0 and "Connected: yes" in stdout_i:
                         run_cmd(["bluetoothctl", "disconnect", dev["mac"]], timeout=10)
+                        # Riattiva le casse interne dopo disconnessione BT
+                        try:
+                            from hw.amp import amp_on
+                            amp_on()
+                            log("Amplificatore interno riattivato", "info")
+                        except Exception as amp_e:
+                            log(f"Errore riattivazione amp interno: {amp_e}", "warning")
                         log(f"Bluetooth: disconnesso da {dev['mac']}", "info")
                         log_event("bluetooth", "info", f"Bluetooth disconnesso da {dev['mac']}", {"mac": dev["mac"]})
                         return jsonify({"status": "ok"})

@@ -408,6 +408,17 @@ def _alarm_worker():
             _wake_for_alarm()
             eventlet.sleep(2)  # Pausa anti-pop per amp
 
+            # Voce simpatica del gufetto prima della sveglia
+            try:
+                from hw.battery import play_ai_notification
+                play_ai_notification(
+                    "Uhuuu! Sveglia sveglia amichetto! È ora di alzarsi! "
+                    "Dai che oggi sarà una giornata bellissima!"
+                )
+                eventlet.sleep(4)  # Aspetta che finisca la voce del gufetto
+            except Exception as e:
+                log(f"Voce sveglia non disponibile: {e}", "warning")
+
             if target:
                 start_player(target, mode="audio_only")
 
@@ -419,9 +430,23 @@ def _alarm_worker():
             bus.emit_notification("⏰ Sveglia!", "info")
 
 
+def _ensure_ntp_sync():
+    """Forza sincronizzazione NTP all'avvio e verifica stato."""
+    try:
+        run_cmd(["sudo", "timedatectl", "set-ntp", "true"], timeout=5)
+        code, out, _ = run_cmd(["timedatectl", "status"], timeout=5)
+        if code == 0 and "synchronized: yes" in out.lower():
+            log("Orologio sincronizzato via NTP ✓", "info")
+        else:
+            log("⚠️ Orologio NON sincronizzato (NTP non raggiungibile o disabilitato)", "warning")
+    except Exception as e:
+        log(f"Errore verifica NTP: {e}", "warning")
+
+
 def init_hardware_workers():
     """Avvia i worker hardware in background"""
     log("Avvio worker hardware (Sleep Timer, Alarm)...", "info")
+    _ensure_ntp_sync()
     eventlet.spawn(_sleep_timer_worker)
     eventlet.spawn(_alarm_worker)
 
