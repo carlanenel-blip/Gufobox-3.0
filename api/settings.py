@@ -47,6 +47,30 @@ def delete_alarm(alarm_id):
     bus.request_emit("public")
     return jsonify({"status": "ok"})
 
+@settings_bp.route("/alarms/<alarm_id>", methods=["PUT", "PATCH"])
+def update_alarm(alarm_id):
+    """Aggiorna una sveglia esistente (toggle enabled, cambio orario, giorni, label, target)."""
+    data = request.get_json(silent=True) or {}
+    for a in alarms_list:
+        if str(a.get("id")) == str(alarm_id):
+            if "enabled" in data:
+                a["enabled"] = bool(data["enabled"])
+            if "hour" in data:
+                a["hour"] = int(data["hour"])
+            if "minute" in data:
+                a["minute"] = int(data["minute"])
+            if "days" in data:
+                a["days"] = data["days"]
+            if "label" in data:
+                a["label"] = data["label"]
+            if "target" in data:
+                a["target"] = data["target"]
+            bus.mark_dirty("alarms")
+            bus.request_emit("public")
+            log(f"Sveglia {alarm_id} aggiornata", "info")
+            return jsonify({"status": "ok", "alarm": a})
+    return jsonify({"error": "Sveglia non trovata"}), 404
+
 # =========================================================
 # PARENTAL CONTROL (#9)
 # =========================================================

@@ -42,6 +42,36 @@ def action_play_pause():
     log("Pulsante FISICO: Play/Pausa", "info")
     if _DIRECT_AVAILABLE:
         try:
+            # Se sveglia attiva → snooze 5 minuti
+            from core.hardware import get_standby_state
+            if get_standby_state() == "alarm_active":
+                log("Pulsante FISICO: Play -> Snooze sveglia 5 minuti", "info")
+                from core.media import stop_player
+                stop_player()
+                # Posponi la sveglia attiva di 5 minuti
+                from core.state import alarms_list, bus
+                from datetime import datetime
+                now = datetime.now()
+                for a in alarms_list:
+                    if a.get("enabled") and a.get("hour") == now.hour and abs(a.get("minute", -99) - now.minute) <= 1:
+                        a["minute"] = (a.get("minute", 0) + 5) % 60
+                        if a["minute"] < 5:
+                            a["hour"] = (a.get("hour", 0) + 1) % 24
+                        bus.mark_dirty("alarms")
+                        break
+                # Torna allo stato awake
+                import core.hardware as _hw
+                _hw._standby_state = _hw.STANDBY_AWAKE
+                _hw._standby_details.update({"in_standby": False, "state": _hw.STANDBY_AWAKE})
+                bus.request_emit("public")
+                bus.emit_notification("Sveglia posposta di 5 minuti ⏰", "info")
+                try:
+                    from hw.battery import play_ai_notification
+                    play_ai_notification("Ancora 5 minutini... Zzz...")
+                except Exception:
+                    pass
+                return
+
             _send_mpv_command(["cycle", "pause"])
             return
         except Exception as e:
@@ -81,30 +111,48 @@ def action_prev():
         log(f"Errore nella richiesta media/prev: {e}", "warning")
 
 def action_power_hold():
-    """Tenendo premuto il tasto Power per 3 secondi andiamo in Standby"""
-    log("Pulsante FISICO: Power (Hold) -> Standby", "warning")
-    if _DIRECT_AVAILABLE:
-        try:
-            _perform_standby()
-            return
-        except Exception as e:
-            log(f"Chiamata diretta standby fallita, provo HTTP: {e}", "warning")
-    try:
-        import requests
-        requests.post(f"{API_BASE}/system", json={"azione": "standby"}, timeout=2)
-    except Exception as e:
-        log(f"Errore nella richiesta standby: {e}", "warning")
+    """Pressione lunga Power: no-op (standby solo da pannello admin)."""
+    log("Pulsante FISICO: Power (Hold) -> Ignorato (standby solo da admin)", "debug")
 
 def action_power_press():
-    """Pressione singola del tasto Power: se in standby, risveglia il sistema."""
-    if _DIRECT_AVAILABLE:
-        try:
-            if _is_in_standby():
-                log("Pulsante FISICO: Power (Press) -> Wake da standby", "info")
-                _wake_from_standby()
-        except Exception as e:
-            log(f"Errore verifica/wake standby: {e}", "warning")
-    # Se awake, la pressione singola non fa nulla (il hold si occupa dello standby)
+    """Pressione singola Power:
+    - Se in standby → wake
+    - Se sveglia attiva → disattiva sveglia (stop player)
+    - Se sveglio → shutdown completo del SO
+    """
+    if not _DIRECT_AVAILABLE:
+        return
+    try:
+        from core.hardware import get_standby_state
+        current_state = get_standby_state()
+
+        if current_state == "standby":
+            log("Pulsante FISICO: Power (Press) -> Wake da standby", "info")
+            _wake_from_standby()
+        elif current_state == "alarm_active":
+            log("Pulsante FISICO: Power (Press) -> Disattiva sveglia", "info")
+            from core.media import stop_player
+            stop_player()
+            import core.hardware as _hw
+            _hw._standby_state = _hw.STANDBY_AWAKE
+            _hw._standby_details.update({"in_standby": False, "state": _hw.STANDBY_AWAKE})
+            from core.state import bus
+            bus.request_emit("public")
+            bus.emit_notification("Sveglia disattivata 🦉", "info")
+        else:
+            log("Pulsante FISICO: Power (Press) -> Shutdown completo SO", "warning")
+            from core.state import bus
+            bus.emit_notification("Spegnimento in corso... 🔌", "warning")
+            try:
+                from hw.battery import play_ai_notification
+                play_ai_notification("Zzz... il gufetto va a dormire! A presto amichetto!")
+                import eventlet
+                eventlet.sleep(3)
+            except Exception:
+                pass
+            _run_cmd(["sudo", "shutdown", "-h", "now"])
+    except Exception as e:
+        log(f"Errore power press: {e}", "warning")
 
 # =========================================================
 # Quando tieni premuto il tasto, gpiozero chiamerà questa funzione di continuo

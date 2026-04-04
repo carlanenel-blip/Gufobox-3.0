@@ -133,10 +133,10 @@ def _battery_watchdog():
             if not charging:
                 if 10 < percent <= 20 and not alert_20_played:
                     play_ai_notification(
-                        "Uhu uhu... il gufetto ha un po' di sonnolino... "
+                        "Uhu uhu... il gufetto ha un po' di fame... "
                         "caricami presto amichetto! Ho bisogno di energiaaaa!"
                     )
-                    bus.emit_notification("Uhu uhu... batteria al 20% 😴🔋", "warning")
+                    bus.emit_notification("Uhu uhu... batteria al 20% 🍪🔋", "warning")
                     alert_20_played = True
 
                 elif percent <= 10 and not alert_10_played:

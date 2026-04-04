@@ -173,18 +173,18 @@ def api_sleep_timer():
 @system_bp.route("/alarms/<alarm_id>/snooze", methods=["POST"])
 def api_alarm_snooze(alarm_id):
     """
-    Posticipa la sveglia di 10 minuti. 
+    Posticipa la sveglia di 5 minuti. 
     Questa rotta verrà chiamata anche dal demone dei pulsanti fisici (GPIO).
     """
     from core.media import stop_player # Import locale per evitare conflitti
     
     for a in alarms_list:
         if str(a.get("id")) == str(alarm_id):
-            # Aggiunge 10 minuti all'orario attuale della sveglia
-            a["minute"] = (a.get("minute", 0) + 10) % 60
+            # Aggiunge 5 minuti all'orario attuale della sveglia
+            a["minute"] = (a.get("minute", 0) + 5) % 60
             
             # Se scatta l'ora successiva
-            if a["minute"] < 10: 
+            if a["minute"] < 5: 
                 a["hour"] = (a.get("hour", 0) + 1) % 24
             
             # Ferma la musica che sta suonando ora
@@ -193,7 +193,7 @@ def api_alarm_snooze(alarm_id):
             # Salva e avvisa il frontend
             bus.mark_dirty("alarms")
             bus.request_emit("public")
-            bus.emit_notification("Sveglia posposta di 10 minuti ⏰", "info")
+            bus.emit_notification("Sveglia posposta di 5 minuti ⏰", "info")
             log(f"Sveglia {alarm_id} posposta alle {a['hour']:02d}:{a['minute']:02d}", "info")
             
             return jsonify({"status": "ok", "message": "Snoozed"})
