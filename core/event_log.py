@@ -58,9 +58,20 @@ def _ensure_cache() -> None:
     """Populate the in-memory cache from disk on first call (called under _lock)."""
     global _events_cache, _cache_initialized, _approx_total
     if not _cache_initialized:
-        _events_cache = _read_raw()[-EVENT_LOG_MAX_ENTRIES:]
-        _approx_total = len(_events_cache)
+        all_events = _read_raw()
+        _approx_total = len(all_events)
+        _events_cache = all_events[-EVENT_LOG_MAX_ENTRIES:]
         _cache_initialized = True
+
+
+def _reset_cache_if_file_changed(current_file: str) -> None:
+    """Reset cache state when the log file path has changed (called under _lock)."""
+    global _append_count, _approx_total, _append_count_for_file, _cache_initialized
+    if _append_count_for_file != current_file:
+        _append_count = 0
+        _approx_total = 0
+        _append_count_for_file = current_file
+        _cache_initialized = False
 
 
 def _read_raw() -> list[dict]:
@@ -140,15 +151,10 @@ def log_event(
     if details:
         event["details"] = details
 
-    global _append_count, _append_count_for_file, _approx_total, _events_cache, _cache_initialized
+    global _append_count, _approx_total, _events_cache
     with _lock:
         current_file = _init_log_file()
-        # Reset counters if the log file has been swapped (e.g. in tests)
-        if _append_count_for_file != current_file:
-            _append_count = 0
-            _approx_total = 0
-            _append_count_for_file = current_file
-            _cache_initialized = False
+        _reset_cache_if_file_changed(current_file)
         _ensure_cache()
         _append_raw(event)
         _events_cache.append(event)
@@ -174,15 +180,9 @@ def get_events(limit: int = 100) -> list[dict]:
 
     Never raises; returns [] on any error.
     """
-    global _events_cache, _cache_initialized, _append_count_for_file, _append_count, _approx_total
     with _lock:
         current_file = _init_log_file()
-        # Reset cache if the log file has been swapped (e.g. in tests)
-        if _append_count_for_file != current_file:
-            _append_count = 0
-            _approx_total = 0
-            _append_count_for_file = current_file
-            _cache_initialized = False
+        _reset_cache_if_file_changed(current_file)
         _ensure_cache()
         events = list(_events_cache)
     # Most recent first

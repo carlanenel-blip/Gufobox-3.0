@@ -17,7 +17,8 @@ def _trigger_rfid_direct(uid_str):
         return handle_rfid_trigger(uid_str)
     except ImportError:
         return False
-    except Exception:
+    except Exception as e:
+        log(f"Chiamata diretta RFID fallita: {e}", "warning")
         return False
 
 
