@@ -9,6 +9,7 @@ from config import AI_SETTINGS_FILE, AI_TTS_CACHE_DIR, OPENAI_API_KEY
 from core.state import ai_runtime, led_runtime, bus, load_json, save_json_direct
 from core.utils import log
 from core.event_log import log_event
+from core.edu_config import VALID_AGE_GROUPS, VALID_ACTIVITY_MODES, VALID_LANGUAGE_TARGETS
 
 # Proviamo a importare OpenAI (se installato)
 try:
@@ -77,19 +78,6 @@ def cleanup_tts_cache():
 # =========================================================
 # EDUCATIONAL AI CONSTANTS
 # =========================================================
-VALID_AGE_GROUPS = {"bambino", "ragazzo", "adulto"}
-VALID_ACTIVITY_MODES = {
-    "teaching_general",
-    "quiz",
-    "math",
-    "animal_sounds_games",
-    "interactive_story",
-    "foreign_languages",
-    "free_conversation",
-    "school_conversation",
-}
-VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french", "japanese", "chinese"}
-
 # Maps legacy interactive_mode values -> canonical activity_mode
 LEGACY_MODE_MAP = {
     "chat_normale":       "free_conversation",
@@ -949,4 +937,3 @@ def api_wizard_categories_post():
 
     log("Wizard categories aggiornate", "info")
     return jsonify({"status": "ok", "wizard_categories": updated})
-

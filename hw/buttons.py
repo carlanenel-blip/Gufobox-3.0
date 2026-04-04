@@ -21,7 +21,7 @@ try:
     from core.hardware import perform_standby as _perform_standby
     from core.hardware import wake_from_standby as _wake_from_standby
     from core.hardware import is_in_standby as _is_in_standby
-    from core.state import media_runtime as _media_runtime, state as _state
+    from core.state import media_runtime as _media_runtime, state as _state, alarms_lock as _alarms_lock
     from core.utils import run_cmd as _run_cmd
     _DIRECT_AVAILABLE = True
 except Exception as _e:
@@ -32,6 +32,7 @@ except Exception as _e:
     _is_in_standby = None
     _media_runtime = None
     _state = None
+    _alarms_lock = None
     _run_cmd = None
     _DIRECT_AVAILABLE = False
 
@@ -52,18 +53,15 @@ def action_play_pause():
                 from core.state import alarms_list, bus
                 from datetime import datetime
                 now = datetime.now()
-                for a in alarms_list:
-                    if a.get("enabled") and a.get("hour") == now.hour and abs(a.get("minute", -99) - now.minute) <= 1:
-                        a["minute"] = (a.get("minute", 0) + 5) % 60
-                        if a["minute"] < 5:
-                            a["hour"] = (a.get("hour", 0) + 1) % 24
-                        bus.mark_dirty("alarms")
-                        break
-                # Torna allo stato awake
-                import core.hardware as _hw
-                _hw._standby_state = _hw.STANDBY_AWAKE
-                _hw._standby_details.update({"in_standby": False, "state": _hw.STANDBY_AWAKE})
-                bus.request_emit("public")
+                with _alarms_lock:
+                    for a in alarms_list:
+                        if a.get("enabled") and a.get("hour") == now.hour and abs(a.get("minute", -99) - now.minute) <= 1:
+                            a["minute"] = (a.get("minute", 0) + 5) % 60
+                            if a["minute"] < 5:
+                                a["hour"] = (a.get("hour", 0) + 1) % 24
+                            bus.mark_dirty("alarms")
+                            break
+                _wake_from_standby("button")
                 bus.emit_notification("Sveglia posposta di 5 minuti ⏰", "info")
                 try:
                     from hw.battery import play_ai_notification
@@ -133,11 +131,8 @@ def action_power_press():
             log("Pulsante FISICO: Power (Press) -> Disattiva sveglia", "info")
             from core.media import stop_player
             stop_player()
-            import core.hardware as _hw
-            _hw._standby_state = _hw.STANDBY_AWAKE
-            _hw._standby_details.update({"in_standby": False, "state": _hw.STANDBY_AWAKE})
             from core.state import bus
-            bus.request_emit("public")
+            _wake_from_standby("button")
             bus.emit_notification("Sveglia disattivata 🦉", "info")
         else:
             log("Pulsante FISICO: Power (Press) -> Shutdown completo SO", "warning")
@@ -229,4 +224,3 @@ def init_buttons():
         
     except Exception as e:
         log(f"Impossibile inizializzare i pulsanti: {e}", "error")
-

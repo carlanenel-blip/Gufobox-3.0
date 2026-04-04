@@ -598,6 +598,52 @@ def test_run_move_missing_source(tmp_path):
     jobs_state.clear()
 
 
+def test_run_copy_revalidates_destination(tmp_path):
+    from unittest.mock import patch
+    from core.state import jobs_state
+    from core.jobs import create_job
+    from api.files import _run_copy
+
+    jobs_state.clear()
+    src = tmp_path / "hello.txt"
+    src.write_text("hello")
+    dest = str(tmp_path / "dest")
+    os.makedirs(dest, exist_ok=True)
+    job = create_job("file_copy", "test")
+
+    def fake_resolve(path):
+        return None if path.endswith("hello.txt") else path
+
+    with patch("api.files._resolve_safe", side_effect=fake_resolve):
+        _run_copy(job["job_id"], [str(src)], dest)
+
+    assert jobs_state[job["job_id"]]["status"] == "error"
+    jobs_state.clear()
+
+
+def test_run_move_revalidates_destination(tmp_path):
+    from unittest.mock import patch
+    from core.state import jobs_state
+    from core.jobs import create_job
+    from api.files import _run_move
+
+    jobs_state.clear()
+    src = tmp_path / "hello.txt"
+    src.write_text("hello")
+    dest = str(tmp_path / "dest")
+    os.makedirs(dest, exist_ok=True)
+    job = create_job("file_move", "test")
+
+    def fake_resolve(path):
+        return None if path.endswith("hello.txt") else path
+
+    with patch("api.files._resolve_safe", side_effect=fake_resolve):
+        _run_move(job["job_id"], [str(src)], dest)
+
+    assert jobs_state[job["job_id"]]["status"] == "error"
+    jobs_state.clear()
+
+
 # ─── L) event_log integration ─────────────────────────────────────────────────
 
 def test_delete_failure_logs_event(tmp_root, monkeypatch):

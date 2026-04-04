@@ -8,8 +8,9 @@ import threading
 import zipfile
 from datetime import datetime
 
+import eventlet
 from flask import Blueprint, request, jsonify
-from core.state import media_runtime, led_runtime, alarms_list, bus, now_ts
+from core.state import media_runtime, led_runtime, alarms_list, alarms_lock, bus, now_ts
 from core.utils import run_cmd, t, log
 from core.hardware import perform_standby, is_in_standby, get_standby_state
 from core.event_log import log_event
@@ -178,25 +179,30 @@ def api_alarm_snooze(alarm_id):
     """
     from core.media import stop_player # Import locale per evitare conflitti
     
-    for a in alarms_list:
-        if str(a.get("id")) == str(alarm_id):
-            # Aggiunge 5 minuti all'orario attuale della sveglia
-            a["minute"] = (a.get("minute", 0) + 5) % 60
-            
-            # Se scatta l'ora successiva
-            if a["minute"] < 5: 
-                a["hour"] = (a.get("hour", 0) + 1) % 24
-            
-            # Ferma la musica che sta suonando ora
-            stop_player()
-            
-            # Salva e avvisa il frontend
-            bus.mark_dirty("alarms")
-            bus.request_emit("public")
-            bus.emit_notification("Sveglia posposta di 5 minuti ⏰", "info")
-            log(f"Sveglia {alarm_id} posposta alle {a['hour']:02d}:{a['minute']:02d}", "info")
-            
-            return jsonify({"status": "ok", "message": "Snoozed"})
+    with alarms_lock:
+        for a in alarms_list:
+            if str(a.get("id")) == str(alarm_id):
+                # Aggiunge 5 minuti all'orario attuale della sveglia
+                a["minute"] = (a.get("minute", 0) + 5) % 60
+
+                # Se scatta l'ora successiva
+                if a["minute"] < 5:
+                    a["hour"] = (a.get("hour", 0) + 1) % 24
+                # Ferma la musica che sta suonando ora
+                stop_player()
+                try:
+                    from core.hardware import wake_from_standby
+                    wake_from_standby("button")
+                except Exception:
+                    pass
+
+                # Salva e avvisa il frontend
+                bus.mark_dirty("alarms")
+                bus.request_emit("public")
+                bus.emit_notification("Sveglia posposta di 5 minuti ⏰", "info")
+                log(f"Sveglia {alarm_id} posposta alle {a['hour']:02d}:{a['minute']:02d}", "info")
+
+                return jsonify({"status": "ok", "message": "Snoozed"})
             
     return jsonify({"error": "Sveglia non trovata"}), 404
 
@@ -209,6 +215,7 @@ _ota_lock = threading.Lock()
 
 # File/cartelle esclusi da backup e rollback
 _BACKUP_EXCLUSIONS = {".git", "__pycache__", "node_modules", "data", ".env"}
+OTA_UPLOAD_CHUNK_SIZE = 64 * 1024
 
 
 def _ota_log(msg):
@@ -315,6 +322,11 @@ def _run_ota(mode):
         _progress(15, f"Backup creato: {backup_name}")
 
         if mode == "app":
+            git_dir = os.path.join(BASE_DIR, ".git")
+            if shutil.which("git") is None:
+                raise RuntimeError("OTA app non disponibile: git non è installato nel container")
+            if not os.path.isdir(git_dir):
+                raise RuntimeError("OTA app non disponibile: repository .git assente; usa OTA da file in Docker")
             _progress(20, "Modalità app — git pull in corso...")
             code, out, err = run_cmd(["git", "pull", "--ff-only"], cwd=BASE_DIR, timeout=120)
             _ota_log(f"git pull: code={code} out={out} err={err}")
@@ -391,8 +403,7 @@ def api_ota_start():
         finally:
             _ota_lock.release()
 
-    t_ota = threading.Thread(target=_worker, daemon=True)
-    t_ota.start()
+    eventlet.spawn_n(_worker)
     bus.emit_notification(f"Aggiornamento avviato (modalità: {mode}) ⬆️", "info")
     return jsonify({"status": "started", "mode": mode})
 
@@ -521,8 +532,7 @@ def api_rollback():
             bus.emit_notification("Rollback completato! ✅ Riavvia per applicare le modifiche.", "success")
             log_event("ota", "info", f"Rollback completato con successo da {trusted_name}", {"backup_name": trusted_name})
 
-    rb_thread = threading.Thread(target=_do_rollback, daemon=True)
-    rb_thread.start()
+    eventlet.spawn_n(_do_rollback)
     return jsonify({"status": "started", "backup_name": trusted_name})
 
 
@@ -764,9 +774,8 @@ def api_ota_upload():
             )
         }), 400
 
-    # Read and check size (stream-safe: read into memory-bounded buffer)
-    data = f.read(OTA_MAX_PACKAGE_BYTES + 1)
-    if len(data) > OTA_MAX_PACKAGE_BYTES:
+    content_length = request.content_length or 0
+    if content_length > OTA_MAX_PACKAGE_BYTES:
         log_event("ota", "warning", "OTA upload rifiutato: file troppo grande", {
             "filename": original_name, "max_bytes": OTA_MAX_PACKAGE_BYTES,
         })
@@ -777,12 +786,35 @@ def api_ota_upload():
             )
         }), 413
 
-    # Save to staging dir (fixed name, sanitised)
+    # Save to staging dir in streaming mode (fixed name, sanitised)
     staged_name = "staged_package" + ext
     staged_path = os.path.join(OTA_STAGING_DIR, staged_name)
+    size_bytes = 0
     try:
         with open(staged_path, "wb") as out:
-            out.write(data)
+            while True:
+                chunk = f.stream.read(OTA_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > OTA_MAX_PACKAGE_BYTES:
+                    raise ValueError("too_large")
+                out.write(chunk)
+    except ValueError as e:
+        if str(e) == "too_large":
+            try:
+                os.remove(staged_path)
+            except OSError:
+                pass
+            log_event("ota", "warning", "OTA upload rifiutato: file troppo grande", {
+                "filename": original_name, "max_bytes": OTA_MAX_PACKAGE_BYTES,
+            })
+            return jsonify({
+                "error": (
+                    f"File troppo grande (max {OTA_MAX_PACKAGE_BYTES // (1024*1024)} MB). "
+                    f"Dimensione ricevuta: > {OTA_MAX_PACKAGE_BYTES // (1024*1024)} MB"
+                )
+            }), 413
     except Exception as e:
         log(f"Errore salvataggio package OTA: {e}", "warning")
         return jsonify({"error": "Impossibile salvare il package nella staging area"}), 500
@@ -799,15 +831,15 @@ def api_ota_upload():
         "description": f"Package '{original_name}' caricato, pronto per la validazione.",
     })
     _save_ota_state(ota_state)
-    _ota_log(f"Package OTA caricato: {original_name} ({len(data)} bytes) → {staged_name}")
+    _ota_log(f"Package OTA caricato: {original_name} ({size_bytes} bytes) → {staged_name}")
     log_event("ota", "info", f"Package OTA caricato: {original_name}", {
-        "filename": original_name, "size_bytes": len(data), "ext": ext,
+        "filename": original_name, "size_bytes": size_bytes, "ext": ext,
     })
 
     return jsonify({
         "status": "uploaded",
         "filename": original_name,
-        "size_bytes": len(data),
+        "size_bytes": size_bytes,
         "ext": ext,
     })
 

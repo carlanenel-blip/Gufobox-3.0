@@ -154,6 +154,13 @@ class TestOtaUpload:
         assert state["staged_at"] is not None
         assert state["mode"] == "file"
 
+    def test_upload_streams_size_without_buffering_response_state(self, client, staging_dir, state_file):
+        payload = _make_valid_zip({"big.bin": b"x" * 4096})
+        resp = _upload_zip(client, data=payload)
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["size_bytes"] == len(payload)
+
     def test_valid_targz_upload(self, client, staging_dir, state_file):
         data = _make_valid_targz()
         resp = client.post(

@@ -10,7 +10,7 @@ from flask_cors import CORS
 from werkzeug.utils import safe_join
 
 # Importiamo la configurazione e le utility
-from config import SECRET_KEY, SESSION_COOKIE_SAMESITE, SESSION_COOKIE_SECURE, API_VERSION
+from config import SECRET_KEY, SESSION_COOKIE_SAMESITE, SESSION_COOKIE_SECURE, API_VERSION, OTA_MAX_PACKAGE_BYTES
 from core.utils import log, request_shutdown
 from core.extensions import socketio
 
@@ -61,6 +61,7 @@ def create_app():
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = SESSION_COOKIE_SAMESITE
     app.config["SESSION_COOKIE_SECURE"] = SESSION_COOKIE_SECURE
+    app.config["MAX_CONTENT_LENGTH"] = OTA_MAX_PACKAGE_BYTES
     
     # Abilitiamo CORS per far comunicare il frontend Vue con il backend Python
     CORS(app, supports_credentials=True)
@@ -198,5 +199,4 @@ if __name__ == "__main__":
         # Pulisce l'annuncio mDNS quando spegni il server
         cleanup_mdns()
         log("GufoBox spenta correttamente.", "info")
-
 

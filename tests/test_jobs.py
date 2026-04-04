@@ -157,6 +157,15 @@ def test_get_job_returns_job():
     assert fetched["job_id"] == job["job_id"]
 
 
+def test_get_job_returns_copy():
+    from core.jobs import create_job, get_job
+    from core.state import jobs_state
+    job = create_job("test", "")
+    fetched = get_job(job["job_id"])
+    fetched["status"] = "tampered"
+    assert jobs_state[job["job_id"]]["status"] == "pending"
+
+
 def test_get_job_missing_returns_none():
     from core.jobs import get_job
     assert get_job("nonexistent") is None

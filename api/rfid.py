@@ -26,6 +26,7 @@ from core.state import rfid_profiles, media_runtime, rss_runtime, bus, save_json
 from config import RFID_PROFILES_FILE
 from core.utils import log
 from core.event_log import log_event
+from core.edu_config import VALID_AGE_GROUPS, VALID_ACTIVITY_MODES, VALID_LANGUAGE_TARGETS
 
 rfid_bp = Blueprint("rfid", __name__)
 
@@ -37,14 +38,10 @@ VALID_MODES = {"media_folder", "webradio", "ai_chat", "rss_feed", "edu_ai", "web
 # web_media content sub-types (for UI clarity; does not affect playback logic)
 VALID_WEB_CONTENT_TYPES = {"radio", "podcast", "youtube", "rss", "generic"}
 
-# Educational AI constants (mirrors api/ai.py — kept in sync)
-_VALID_AGE_GROUPS = {"bambino", "ragazzo", "adulto"}
-_VALID_ACTIVITY_MODES = {
-    "teaching_general", "quiz", "math", "animal_sounds_games",
-    "interactive_story", "foreign_languages", "free_conversation",
-    "school_conversation",
-}
-_VALID_LANGUAGE_TARGETS = {"english", "spanish", "german", "french", "japanese", "chinese"}
+# Educational AI constants kept as aliases for backward compatibility
+_VALID_AGE_GROUPS = VALID_AGE_GROUPS
+_VALID_ACTIVITY_MODES = VALID_ACTIVITY_MODES
+_VALID_LANGUAGE_TARGETS = VALID_LANGUAGE_TARGETS
 _HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{3,8}$')
 
 # Reti IP private/loopback da bloccare per prevenire SSRF.

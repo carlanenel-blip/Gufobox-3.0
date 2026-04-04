@@ -8,14 +8,20 @@ _zeroconf = None
 
 def get_local_ip():
     """Trova l'indirizzo IP reale del Raspberry sulla rete WiFi"""
+    s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80)) # Simula una connessione esterna
         ip = s.getsockname()[0]
-        s.close()
         return ip
     except Exception:
         return "127.0.0.1"
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
 
 def init_mdns_discovery():
     global _zeroconf
@@ -46,4 +52,3 @@ def cleanup_mdns():
     if _zeroconf:
         _zeroconf.unregister_all_services()
         _zeroconf.close()
-

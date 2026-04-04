@@ -1,8 +1,9 @@
 import uuid
 import csv
 import io
+from copy import deepcopy
 from flask import Blueprint, request, jsonify, Response
-from core.state import state, alarms_list, media_runtime, bus, save_json_direct
+from core.state import state, alarms_list, alarms_lock, media_runtime, bus, save_json_direct
 from config import ALARMS_FILE, STATE_FILE
 from core.utils import log, run_cmd
 from core.database import (
@@ -17,7 +18,8 @@ settings_bp = Blueprint('settings', __name__)
 # =========================================================
 @settings_bp.route("/alarms", methods=["GET"])
 def get_alarms():
-    return jsonify(alarms_list)
+    with alarms_lock:
+        return jsonify(deepcopy(alarms_list))
 
 @settings_bp.route("/alarms", methods=["POST"])
 def add_alarm():
@@ -33,7 +35,8 @@ def add_alarm():
         "target": data.get("target", "") # Percorso file o URL radio
     }
     
-    alarms_list.append(new_alarm)
+    with alarms_lock:
+        alarms_list.append(new_alarm)
     bus.mark_dirty("alarms")
     bus.request_emit("public")
     log(f"Sveglia creata per le {new_alarm['hour']}:{new_alarm['minute']}", "info")
@@ -41,8 +44,8 @@ def add_alarm():
 
 @settings_bp.route("/alarms/<alarm_id>", methods=["DELETE"])
 def delete_alarm(alarm_id):
-    global alarms_list
-    alarms_list[:] = [a for a in alarms_list if str(a.get("id")) != str(alarm_id)]
+    with alarms_lock:
+        alarms_list[:] = [a for a in alarms_list if str(a.get("id")) != str(alarm_id)]
     bus.mark_dirty("alarms")
     bus.request_emit("public")
     return jsonify({"status": "ok"})
@@ -51,24 +54,26 @@ def delete_alarm(alarm_id):
 def update_alarm(alarm_id):
     """Aggiorna una sveglia esistente (toggle enabled, cambio orario, giorni, label, target)."""
     data = request.get_json(silent=True) or {}
-    for a in alarms_list:
-        if str(a.get("id")) == str(alarm_id):
-            if "enabled" in data:
-                a["enabled"] = bool(data["enabled"])
-            if "hour" in data:
-                a["hour"] = int(data["hour"])
-            if "minute" in data:
-                a["minute"] = int(data["minute"])
-            if "days" in data:
-                a["days"] = data["days"]
-            if "label" in data:
-                a["label"] = data["label"]
-            if "target" in data:
-                a["target"] = data["target"]
-            bus.mark_dirty("alarms")
-            bus.request_emit("public")
-            log(f"Sveglia {alarm_id} aggiornata", "info")
-            return jsonify({"status": "ok", "alarm": a})
+    with alarms_lock:
+        for a in alarms_list:
+            if str(a.get("id")) == str(alarm_id):
+                if "enabled" in data:
+                    a["enabled"] = bool(data["enabled"])
+                if "hour" in data:
+                    a["hour"] = int(data["hour"])
+                if "minute" in data:
+                    a["minute"] = int(data["minute"])
+                if "days" in data:
+                    a["days"] = data["days"]
+                if "label" in data:
+                    a["label"] = data["label"]
+                if "target" in data:
+                    a["target"] = data["target"]
+                updated_alarm = deepcopy(a)
+                bus.mark_dirty("alarms")
+                bus.request_emit("public")
+                log(f"Sveglia {alarm_id} aggiornata", "info")
+                return jsonify({"status": "ok", "alarm": updated_alarm})
     return jsonify({"error": "Sveglia non trovata"}), 404
 
 # =========================================================
@@ -155,4 +160,3 @@ def api_stats_export():
         )
 
     return jsonify(data)
-
