@@ -26,15 +26,9 @@ export function useAi() {
     }
     // Rileva Safari/iOS: su questi browser l'API esiste ma ha limitazioni severe
     // (non funziona in background, richiede interazione utente, instabile su iOS).
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
-    const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-    if (isIOS || isSafariBrowser) {
-      // Supporto parziale: l'API è presente ma inaffidabile. Permettiamo il tentativo
-      // ma impostiamo un flag per mostrare l'avviso appropriato in toggleListening().
-      speechSupported.value = true
-    } else {
-      speechSupported.value = true
-    }
+    // Non disabilitiamo qui speechSupported perché l'API è presente; il feedback
+    // specifico viene dato al momento dell'errore in onerror e in toggleListening().
+    speechSupported.value = true
     recognition = new SpeechRecognition()
     recognition.lang = 'it-IT'
     recognition.interimResults = false
@@ -65,7 +59,7 @@ export function useAi() {
       } else if (e.error === 'service-not-allowed') {
         // Errore tipico di Safari iOS quando il contesto non è sicuro o l'utente non ha
         // ancora interagito con la pagina.
-        aiError.value = 'Microfono non disponibile. Su Safari/iOS apri la pagina tramite HTTPS e premi prima il tasto prima di parlare.'
+        aiError.value = 'Microfono non disponibile. Su Safari/iOS apri la pagina tramite HTTPS e premi il tasto prima di parlare.'
       } else {
         aiError.value = `Errore microfono: ${e.error}`
       }
