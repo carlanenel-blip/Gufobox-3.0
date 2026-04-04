@@ -77,6 +77,10 @@ DEFAULT_MEDIA_RUNTIME = {
     "current_playlist": [],
     "playlist_index": 0,
     "rss_state": None,
+    # Posizione di riproduzione per la progress bar del frontend
+    "position_sec": 0,
+    "duration_sec": 0,
+    "paused": False,
 }
 DEFAULT_LED_RUNTIME = {
     # --- New PR3 fields ---

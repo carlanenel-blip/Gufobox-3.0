@@ -10,6 +10,9 @@ from core.state import media_runtime, bus
 from core.utils import log
 from config import MEDIA_EXTENSIONS
 
+# Socket IPC per la comunicazione bidirezionale con MPV
+MPV_IPC_SOCKET = "/tmp/mpv-gufobox-socket"
+
 # player_lock protegge atomicamente player_proc E tutte le variabili di
 # tracciamento sessione (_current_rfid_uid, _current_target,
 # _current_playlist_index, _session_start_ts).
@@ -315,7 +318,36 @@ def _player_watchdog_loop():
         except Exception as e:
             log(f"Errore nel watchdog del player: {e}", "warning")
 
+def _update_playback_position():
+    """Interroga MPV per la posizione corrente e aggiorna media_runtime."""
+    try:
+        pos_resp = send_mpv_command(["get_property", "time-pos"])
+        dur_resp = send_mpv_command(["get_property", "duration"])
+        pause_resp = send_mpv_command(["get_property", "pause"])
+
+        if pos_resp and pos_resp.get("error") == "success":
+            media_runtime["position_sec"] = round(pos_resp.get("data", 0) or 0, 1)
+        if dur_resp and dur_resp.get("error") == "success":
+            media_runtime["duration_sec"] = round(dur_resp.get("data", 0) or 0, 1)
+        if pause_resp and pause_resp.get("error") == "success":
+            media_runtime["paused"] = bool(pause_resp.get("data", False))
+
+        bus.request_emit("public")
+    except Exception:
+        pass
+
+
+def _position_poll_worker():
+    """Aggiorna la posizione di riproduzione ogni secondo per la progress bar del frontend."""
+    from core.utils import is_shutdown_requested
+    while not is_shutdown_requested():
+        if media_runtime.get("player_running") and player_proc is not None:
+            _update_playback_position()
+        eventlet.sleep(1)
+
+
 def init_media_workers():
     """Chiamata dal main.py per avviare il Watchdog in background"""
     eventlet.spawn(_player_watchdog_loop)
+    eventlet.spawn(_position_poll_worker)
 

@@ -1,4 +1,5 @@
 import math
+import random
 import eventlet
 from core.state import led_runtime, bus
 from core.utils import log
@@ -125,7 +126,48 @@ def _led_worker():
             set_all_color(Color(0, 0, 0))
             strip.show()
             eventlet.sleep(sleep_time * 0.7)
-            
+
+        elif effect == "theater_chase":
+            for q in range(3):
+                for i in range(0, strip.numPixels(), 3):
+                    if i + q < strip.numPixels():
+                        strip.setPixelColor(i + q, _hex_to_color(color_hex))
+                strip.show()
+                eventlet.sleep(sleep_time)
+                for i in range(0, strip.numPixels(), 3):
+                    if i + q < strip.numPixels():
+                        strip.setPixelColor(i + q, Color(0, 0, 0))
+
+        elif effect == "bounce":
+            pos = step % (strip.numPixels() * 2 - 2)
+            if pos >= strip.numPixels():
+                pos = (strip.numPixels() * 2 - 2) - pos
+            set_all_color(Color(0, 0, 0))
+            strip.setPixelColor(pos, _hex_to_color(color_hex))
+            strip.show()
+            step += 1
+            eventlet.sleep(sleep_time)
+
+        elif effect == "twinkle":
+            set_all_color(Color(0, 0, 0))
+            for _ in range(max(1, strip.numPixels() // 3)):
+                idx = random.randint(0, strip.numPixels() - 1)
+                strip.setPixelColor(idx, _hex_to_color(color_hex))
+            strip.show()
+            step += 1
+            eventlet.sleep(sleep_time)
+
+        elif effect == "fire":
+            for i in range(strip.numPixels()):
+                flicker = random.randint(0, 80)
+                r = max(0, 226 - flicker)
+                g = max(0, 121 - flicker)
+                b = max(0, 35 - flicker // 2)
+                strip.setPixelColor(i, Color(r, g, b))
+            strip.show()
+            step += 1
+            eventlet.sleep(sleep_time * 0.5)
+
         else:
             set_all_color(Color(0, 0, 0))
             eventlet.sleep(1)
