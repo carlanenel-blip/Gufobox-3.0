@@ -9,6 +9,7 @@ Implements:
 
 import hashlib
 import hmac
+import re
 import secrets
 import time
 
@@ -65,7 +66,7 @@ def init_auth():
             auth[key] = default_val
     # Se il pin_hash non è un hex valido di 64 caratteri, reimpostalo al default
     pin_hash = auth.get("pin_hash", "")
-    if not (isinstance(pin_hash, str) and len(pin_hash) == 64 and all(c in "0123456789abcdef" for c in pin_hash)):
+    if not (isinstance(pin_hash, str) and re.fullmatch(r"[0-9a-f]{64}", pin_hash)):
         auth["pin_hash"] = _hash_pin(_DEFAULT_PIN)
         bus.mark_dirty("state")
 
