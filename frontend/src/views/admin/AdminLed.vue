@@ -75,7 +75,20 @@
           </div>
           <div class="form-group">
             <label>Colore</label>
-            <input type="color" v-model="masterSettings.color" />
+            <div class="color-wheel-wrapper">
+              <div ref="colorWheelEl"></div>
+              <div class="color-hex-display">
+                <span class="color-swatch" :style="{ background: masterSettings.color }"></span>
+                <input
+                  type="text"
+                  v-model="masterSettings.color"
+                  @change="onHexInputChange"
+                  class="hex-input"
+                  maxlength="7"
+                  placeholder="#0000ff"
+                />
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>Intensità {{ masterSettings.brightness }}%</label>
@@ -149,7 +162,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useApi } from '../../composables/useApi'
 import { useAdminFeedback } from '../../composables/useAdminFeedback'
 
@@ -161,6 +174,7 @@ const saving = ref(false)
 const testing = ref(false)
 const effects = ref([])
 const status = ref(null)
+const colorWheelEl = ref(null)
 
 // Settings sub-object (mirrors backend "settings" field)
 const masterSettings = reactive({
@@ -171,6 +185,10 @@ const masterSettings = reactive({
 })
 // Override flag (mirrors backend "override_active" field)
 const masterOverrideActive = ref(false)
+
+// iro.js color picker instance
+let iroColorPicker = null
+let _iroUpdating = false  // guard against feedback loops between picker and v-model
 
 const previewStyle = computed(() => ({
   background: masterSettings.color,
@@ -187,6 +205,53 @@ function sourceLabel(src) {
   }
   return map[src] || src || '—'
 }
+
+function loadIroScript() {
+  return new Promise((resolve) => {
+    if (window.iro) { resolve(); return }
+    const script = document.createElement('script')
+    script.src = '/vendor/iro.min.js'
+    script.onload = resolve
+    script.onerror = () => { console.warn('iro.js not available'); resolve() }
+    document.head.appendChild(script)
+  })
+}
+
+function initColorWheel() {
+  if (!colorWheelEl.value || !window.iro) return
+  iroColorPicker = new window.iro.ColorPicker(colorWheelEl.value, {
+    width: 160,
+    color: masterSettings.color,
+    layout: [
+      { component: window.iro.ui.Wheel },
+      { component: window.iro.ui.Slider, options: { sliderType: 'value' } },
+    ],
+  })
+  iroColorPicker.on('color:change', (color) => {
+    if (_iroUpdating) return
+    masterSettings.color = color.hexString
+  })
+}
+
+// Sync picker when color is changed via hex text input
+function onHexInputChange() {
+  const val = masterSettings.color
+  if (/^#[0-9a-fA-F]{6}$/.test(val) && iroColorPicker) {
+    _iroUpdating = true
+    iroColorPicker.color.hexString = val
+    _iroUpdating = false
+  }
+}
+
+// Sync picker when master settings are loaded from backend
+watch(() => masterSettings.color, (newColor) => {
+  if (_iroUpdating || !iroColorPicker) return
+  if (/^#[0-9a-fA-F]{6}$/.test(newColor)) {
+    _iroUpdating = true
+    iroColorPicker.color.hexString = newColor
+    _iroUpdating = false
+  }
+})
 
 async function loadMaster() {
   loadingMaster.value = true
@@ -298,10 +363,19 @@ async function deleteEffect(effectId) {
   }
 }
 
-onMounted(() => {
-  loadMaster()
-  loadEffects()
-  loadStatus()
+onMounted(async () => {
+  await loadMaster()
+  await loadEffects()
+  await loadStatus()
+  await loadIroScript()
+  initColorWheel()
+})
+
+onUnmounted(() => {
+  if (iroColorPicker) {
+    iroColorPicker.off('color:change')
+    iroColorPicker = null
+  }
 })
 </script>
 
@@ -398,6 +472,40 @@ onMounted(() => {
   background: #1e1e26;
   cursor: pointer;
   padding: 2px;
+}
+
+/* iro.js color wheel */
+.color-wheel-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.color-hex-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.hex-input {
+  background: #1e1e26;
+  border: 1px solid #3a3a48;
+  color: white;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  width: 90px;
 }
 
 .override-row {
