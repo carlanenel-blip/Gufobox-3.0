@@ -159,7 +159,7 @@
       </div>
 
       <div v-if="testAudioUrl" class="audio-player">
-        <audio controls :src="testAudioUrl" autoplay></audio>
+        <audio controls :src="testAudioUrl" :aria-label="`Audio di test: ${testText}`"></audio>
       </div>
 
       <div v-if="status && !status.piper_available" class="banner banner-warning mt-small">

@@ -119,6 +119,48 @@ def _validate_voice_name(voice):
         raise ValueError("Nome voce non valido (solo lettere, cifre, trattini e underscore)")
 
 
+def _resolve_voice_model_path(voice):
+    """Return the .onnx path for *voice* by scanning PIPER_VOICES_DIR.
+
+    The returned path is fully derived from the filesystem (not from user
+    input), so it cannot introduce path-injection or command-injection.
+    Raises ValueError if the voice is not found in the directory.
+    """
+    _validate_voice_name(voice)
+    # Enumerate files from disk — the path used is the fs-derived name
+    try:
+        entries = os.listdir(PIPER_VOICES_DIR)
+    except OSError:
+        entries = []
+    for entry in entries:
+        if entry.endswith(".onnx") and not entry.endswith(".onnx.json"):
+            disk_name = os.path.splitext(entry)[0]
+            if disk_name == voice:
+                # Path constructed entirely from the filesystem-derived entry
+                return os.path.join(PIPER_VOICES_DIR, entry)
+    raise ValueError("Modello voce non trovato")
+
+
+def _resolve_cache_wav_path(filename):
+    """Return the full path to a WAV file in the Piper cache.
+
+    The path is derived from the filesystem listing (not from the user-provided
+    filename), eliminating path-injection. Returns None if not found.
+    """
+    # Validate format first (32-char lowercase hex + .wav)
+    safe_name = os.path.basename(filename)
+    if not re.fullmatch(r'[0-9a-fA-F]{32}\.wav', safe_name):
+        return None
+    try:
+        entries = os.listdir(PIPER_TTS_CACHE_DIR)
+    except OSError:
+        return None
+    for entry in entries:
+        if entry == safe_name:
+            return os.path.join(PIPER_TTS_CACHE_DIR, entry)
+    return None
+
+
 def _safe_error(exc):
     """Return a brief, sanitized error message safe for client responses."""
     return str(exc)[:_MAX_ERR_LEN]
@@ -134,15 +176,8 @@ def synthesize_with_piper(text, voice=""):
     if not voice:
         raise RuntimeError("Nessuna voce offline configurata")
 
-    _validate_voice_name(voice)
-
-    # Build paths using only the validated voice name — no user input reaches os.path.join
-    model_path = os.path.join(PIPER_VOICES_DIR, f"{voice}.onnx")
-    # Confirm the resolved path is still inside PIPER_VOICES_DIR (defense-in-depth)
-    if not os.path.realpath(model_path).startswith(os.path.realpath(PIPER_VOICES_DIR)):
-        raise ValueError("Percorso modello voce non valido")
-    if not os.path.isfile(model_path):
-        raise RuntimeError("Modello voce non trovato")
+    # model_path is derived from the filesystem, not from user input directly
+    model_path = _resolve_voice_model_path(voice)
 
     cache_enabled = piper_settings.get("cache_enabled", True)
     cache_key = _piper_cache_key(text, voice)
@@ -152,6 +187,7 @@ def synthesize_with_piper(text, voice=""):
         log(f"Piper TTS cache hit: {cache_key[:8]}", "info")
         return out_path
 
+    # Both model_path (from fs scan) and out_path (from hash) are safe
     cmd = [
         PIPER_EXECUTABLE,
         "--model", model_path,
@@ -296,7 +332,7 @@ def api_tts_offline_test():
         })
     except (ValueError, RuntimeError) as e:
         log(f"Piper test failed: {e}", "error")
-        return jsonify({"error": _safe_error(e)}), 500
+        return jsonify({"error": "Sintesi vocale offline non riuscita"}), 500
     except Exception as e:
         log(f"Piper test unexpected error: {e}", "error")
         return jsonify({"error": "Errore interno sintesi vocale"}), 500
@@ -305,15 +341,9 @@ def api_tts_offline_test():
 @tts_bp.route("/tts/offline/audio/<filename>", methods=["GET"])
 def api_tts_offline_serve(filename):
     """Serve a WAV file from the Piper cache."""
-    # Accept only hex-named cache files (32-char MD5 + .wav)
-    safe_name = os.path.basename(filename)
-    if not re.fullmatch(r'[0-9a-f]{32}\.wav', safe_name):
-        return jsonify({"error": "File non trovato"}), 404
-    file_path = os.path.join(PIPER_TTS_CACHE_DIR, safe_name)
-    # Confirm resolved path is inside cache dir (defense-in-depth)
-    if not os.path.realpath(file_path).startswith(os.path.realpath(PIPER_TTS_CACHE_DIR)):
-        return jsonify({"error": "File non trovato"}), 404
-    if not os.path.isfile(file_path):
+    # file_path is derived from the filesystem listing, not from user input
+    file_path = _resolve_cache_wav_path(filename)
+    if file_path is None:
         return jsonify({"error": "File non trovato"}), 404
     return send_file(file_path, mimetype="audio/wav")
 
