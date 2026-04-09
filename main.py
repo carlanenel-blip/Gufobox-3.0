@@ -45,6 +45,7 @@ from api.rfid import rfid_bp
 from api.rss import rss_bp
 from api.audio import audio_bp
 from api.wizard import wizard_bp
+from api.tts import tts_bp
 
 import os
 import signal
@@ -89,6 +90,7 @@ def create_app():
     app.register_blueprint(rss_bp, url_prefix='/api')
     app.register_blueprint(audio_bp, url_prefix='/api')
     app.register_blueprint(wizard_bp, url_prefix='/api')
+    app.register_blueprint(tts_bp, url_prefix='/api')
 
     # Servi i file statici del frontend Vue (build produzione)
     if os.path.isdir(_FRONTEND_DIST):

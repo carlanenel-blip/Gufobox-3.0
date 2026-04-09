@@ -94,3 +94,15 @@ LED_CHANNEL    = int(os.environ.get("GUFOBOX_LED_CHANNEL", "0"))
 # Cookie Settings
 SESSION_COOKIE_SECURE = os.environ.get("GUFOBOX_COOKIE_SECURE", "0") == "1"
 SESSION_COOKIE_SAMESITE = os.environ.get("GUFOBOX_COOKIE_SAMESITE", "Lax")
+
+# Offline TTS / Piper
+PIPER_SETTINGS_FILE = os.path.join(DATA_DIR, "piper_settings.json")
+PIPER_TTS_CACHE_DIR = os.path.join(DATA_DIR, "piper_tts_cache")
+# Directory where Piper voice models (.onnx + .onnx.json) are stored
+PIPER_VOICES_DIR = os.environ.get(
+    "GUFOBOX_PIPER_VOICES_DIR", os.path.join(DATA_DIR, "piper_voices")
+)
+# Path to the piper binary (default: search in PATH)
+PIPER_EXECUTABLE = os.environ.get("GUFOBOX_PIPER_BIN", "piper")
+os.makedirs(PIPER_TTS_CACHE_DIR, exist_ok=True)
+os.makedirs(PIPER_VOICES_DIR, exist_ok=True)
