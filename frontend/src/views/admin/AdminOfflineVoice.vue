@@ -123,7 +123,7 @@
         <input
           ref="fileInputRef"
           type="file"
-          accept=".onnx,.json"
+          accept=".onnx,.onnx.json"
           multiple
           class="file-input"
           @change="onFilesSelected"

@@ -59,7 +59,8 @@ _MAX_ERR_LEN = 120
 # Allowed Piper voice file extensions
 _PIPER_ALLOWED_EXTENSIONS = {".onnx", ".onnx.json"}
 # Maximum upload size for a single Piper voice file (50 MB)
-_PIPER_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+_PIPER_MAX_UPLOAD_MB = 50
+_PIPER_MAX_UPLOAD_BYTES = _PIPER_MAX_UPLOAD_MB * 1024 * 1024
 
 piper_settings = load_json(PIPER_SETTINGS_FILE, _DEFAULT_PIPER_SETTINGS)
 
@@ -430,14 +431,15 @@ def api_tts_offline_upload():
     try:
         safe_name = _validate_piper_upload_filename(upload.filename)
     except ValueError as exc:
-        return jsonify({"error": _safe_error(exc)}), 400
+        # Return only the human-readable validation message (no stack trace)
+        return jsonify({"error": str(exc)[:_MAX_ERR_LEN]}), 400
 
     # Guard against oversized uploads
     upload.seek(0, 2)
     file_size = upload.tell()
     upload.seek(0)
     if file_size > _PIPER_MAX_UPLOAD_BYTES:
-        return jsonify({"error": f"File troppo grande (max {_PIPER_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"}), 413
+        return jsonify({"error": f"File troppo grande (max {_PIPER_MAX_UPLOAD_MB} MB)"}), 413
 
     dest_path = os.path.join(PIPER_VOICES_DIR, safe_name)
     try:
